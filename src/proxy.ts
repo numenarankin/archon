@@ -18,7 +18,7 @@ import { getSupabaseUrl } from "@/lib/env";
 // well-position vector tiles (coordinates only) for the map; keeping it public
 // avoids any cookie dependency for Mapbox tile requests. The /map page itself
 // stays auth-gated.
-const PUBLIC_PATHS = ["/auth", "/api/tiles"];
+const PUBLIC_PATHS = ["/auth", "/api/tiles", "/operators.json"];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PATHS.some(

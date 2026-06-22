@@ -108,3 +108,25 @@ export async function getTasks(folderId?: string): Promise<Task[]> {
   if (error) throw new Error(`getTasks: ${error.message}`);
   return ((data ?? []) as TaskRow[]).map(mapTask);
 }
+
+/**
+ * Names of the team members a task can be assigned to, drawn from the `users`
+ * table (the people in this workspace). Returns an empty list when Supabase is
+ * unconfigured or the table is empty — the board still offers "Me". This
+ * replaces the old contractor-based list, which assumed a `contractors` table
+ * that isn't part of the live schema.
+ */
+export async function getAssignees(): Promise<string[]> {
+  if (!hasSupabase()) return [];
+  const sb = await getSupabaseServer();
+  const { data, error } = await sb
+    .from("users")
+    .select("name")
+    .order("name");
+  // The users table is optional (single-user installs leave it empty); never
+  // let a missing/empty roster break the Tasks page.
+  if (error) return [];
+  return (data ?? [])
+    .map((r) => (r as { name: string | null }).name?.trim() ?? "")
+    .filter(Boolean);
+}

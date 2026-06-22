@@ -15,6 +15,7 @@ export function AppMain({ children }: { children: React.ReactNode }) {
     /^\/projects\/[^/]+/.test(pathname) ||
     pathname === "/archon" ||
     pathname === "/calendar" ||
+    pathname === "/email" ||
     pathname === "/map";
 
   if (fullBleed) {

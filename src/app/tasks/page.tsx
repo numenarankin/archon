@@ -1,17 +1,13 @@
-import { getTasks } from "@/lib/tasks/tasks";
-import { getContractors } from "@/lib/people/people";
+import { getTasks, getAssignees } from "@/lib/tasks/tasks";
 import { TasksBoard } from "@/components/tasks/tasks-board";
 import { requirePermission } from "@/lib/auth/permissions";
 
 export default async function TasksPage() {
   await requirePermission("manage_tasks");
-  const [tasks, contractors] = await Promise.all([
-    getTasks(),
-    getContractors(),
-  ]);
+  const [tasks, team] = await Promise.all([getTasks(), getAssignees()]);
 
-  // Assignable people: the current user plus every contractor on the People page.
-  const assignees = ["Me", ...contractors.map((c) => c.name)];
+  // Assignable people: the current user plus every workspace member, de-duped.
+  const assignees = ["Me", ...team.filter((name) => name !== "Me")];
 
   return <TasksBoard tasks={tasks} assignees={assignees} />;
 }

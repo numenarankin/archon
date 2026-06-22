@@ -57,6 +57,37 @@ export async function countWells(f: WellCountFilters) {
   return { count: count ?? 0, sample: (data ?? []).map((r) => r.api_number) };
 }
 
+/** Operators by mailing city/ZIP, filtered by total wells operated. */
+export async function operatorsByLocation(args: {
+  city?: string;
+  zip?: number;
+  min_wells?: number;
+  max_wells?: number;
+}) {
+  const sb = await getSupabaseServer();
+  const { data, error } = await sb.rpc("operators_by_location", {
+    p_city: args.city ?? null,
+    p_zip: args.zip ?? null,
+    p_min: args.min_wells ?? 0,
+    p_max: args.max_wells ?? null,
+  });
+  if (error) return { error: error.message, operators: [] };
+  return { operators: data ?? [] };
+}
+
+/** Operators that operate wells in a Texas county, ranked by wells there. */
+export async function operatorsInCounty(args: { county: string; min_wells?: number }) {
+  const code = countyCode(args.county);
+  if (code === null) return { error: `Unknown county "${args.county}".`, operators: [] };
+  const sb = await getSupabaseServer();
+  const { data, error } = await sb.rpc("operators_in_county", {
+    p_county: code,
+    p_min: args.min_wells ?? 1,
+  });
+  if (error) return { error: error.message, operators: [] };
+  return { county: args.county, operators: data ?? [] };
+}
+
 /** Operator P-5 profile + officers + how many wells they operate. */
 export async function lookupOperator(args: { name?: string; operator_number?: number }) {
   const sb = await getSupabaseServer();

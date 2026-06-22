@@ -13,7 +13,13 @@ import { readConversation, searchChatHistory } from "@/lib/ai/chat-history";
 import { getTasks } from "@/lib/tasks/tasks";
 import { createTask } from "@/lib/tasks/actions";
 import { createProjectDocument } from "@/lib/files/actions";
-import { lookupWell, countWells, lookupOperator } from "@/lib/wells/server";
+import {
+  lookupWell,
+  countWells,
+  lookupOperator,
+  operatorsByLocation,
+  operatorsInCounty,
+} from "@/lib/wells/server";
 
 /**
  * The tools Archon can call to read the company's live data + search documents +
@@ -254,6 +260,32 @@ export function archonTools(folderId?: string) {
         operator_number: z.number().int().optional(),
       }),
       execute: async (args) => lookupOperator(args),
+    }),
+    operators_by_location: tool({
+      description:
+        "RRC Well Map: find operators by their MAILING location (city and/or " +
+        "ZIP), optionally filtered by total wells operated. Use for questions " +
+        "like 'operators in Graham, TX with more than 30 wells'. Returns name, " +
+        "address, phone, and well count, ranked by well count.",
+      inputSchema: z.object({
+        city: z.string().optional().describe("operator mailing city, e.g. Graham"),
+        zip: z.number().int().optional().describe("5-digit ZIP code"),
+        min_wells: z.number().int().optional().describe("minimum wells operated"),
+        max_wells: z.number().int().optional(),
+      }),
+      execute: async (args) => operatorsByLocation(args),
+    }),
+    operators_in_county: tool({
+      description:
+        "RRC Well Map: operators that OPERATE wells in a Texas county, ranked by " +
+        "how many wells they operate THERE. Use for 'operators with more than N " +
+        "wells in <county>' (well location, not mailing address). Returns name, " +
+        "city, phone, and wells-in-county.",
+      inputSchema: z.object({
+        county: z.string().describe("Texas county name, e.g. Young"),
+        min_wells: z.number().int().optional().describe("minimum wells in the county"),
+      }),
+      execute: async (args) => operatorsInCounty(args),
     }),
   };
 }

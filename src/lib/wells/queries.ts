@@ -74,6 +74,30 @@ export async function getWellDetail(api: number): Promise<WellDetail> {
   return { well: (wellRes.data as WellRow | null) ?? null, operator, officers };
 }
 
+/** One operator placed at its mailing-ZIP centroid (from public/operators.json). */
+export interface OperatorPoint {
+  n: number; // operator_number
+  nm: string; // name
+  a: string; // address line 1
+  c: string; // city
+  s: string; // state
+  z: number; // zip
+  lng: number;
+  lat: number;
+  w: number; // well count
+}
+
+let operatorsCache: OperatorPoint[] | null = null;
+
+/** Load + cache the static operator points (placed by ZIP) for operator mode. */
+export async function loadOperatorPoints(): Promise<OperatorPoint[]> {
+  if (operatorsCache) return operatorsCache;
+  const res = await fetch("/operators.json");
+  if (!res.ok) throw new Error(`operators.json ${res.status}`);
+  operatorsCache = (await res.json()) as OperatorPoint[];
+  return operatorsCache;
+}
+
 export interface FocusWell {
   api: number;
   lng: number;
@@ -177,6 +201,7 @@ export interface OperatorFull {
   state: string | null;
   zip: number | null;
   zip_suffix: number | null;
+  phone: number | null;
   last_p5_date: number | null;
   oil_gatherer: string | null;
   gas_gatherer: string | null;
@@ -242,6 +267,66 @@ export async function getOperatorDetail(
     wellCount: linkRes.count ?? apis.length,
     wells,
   };
+}
+
+export interface OperatorLast12 {
+  oil_last12: number;
+  gas_last12: number;
+}
+
+/** Last-12mo oil/gas per operator for a set, keyed by operator number. */
+export async function getOperatorsLast12(
+  operatorNumbers: number[],
+): Promise<Map<number, { oil: number; gas: number }>> {
+  const m = new Map<number, { oil: number; gas: number }>();
+  if (operatorNumbers.length === 0) return m;
+  const sb = getSupabaseBrowser();
+  const { data, error } = await sb.rpc("operators_last12", {
+    p_operators: operatorNumbers,
+  });
+  if (error) throw new Error(`operators_last12: ${error.message}`);
+  for (const r of (data as
+    | { operator_no: number; oil_last12: number; gas_last12: number }[]
+    | null) ?? []) {
+    m.set(r.operator_no, { oil: r.oil_last12 ?? 0, gas: r.gas_last12 ?? 0 });
+  }
+  return m;
+}
+
+/** An operator's last-12-month oil + gas production totals. */
+export async function getOperatorLast12(
+  operatorNumber: number,
+): Promise<OperatorLast12> {
+  const sb = getSupabaseBrowser();
+  const { data, error } = await sb.rpc("operator_last12", {
+    p_operator: operatorNumber,
+  });
+  if (error) throw new Error(`operator_last12: ${error.message}`);
+  const row = (data as OperatorLast12[] | null)?.[0];
+  return { oil_last12: row?.oil_last12 ?? 0, gas_last12: row?.gas_last12 ?? 0 };
+}
+
+export interface OperatorLease {
+  oil_gas_code: string;
+  district_no: number;
+  lease_no: number;
+  lease_name: string | null;
+  well_count: number;
+  oil_last12: number | null;
+  gas_last12: number | null;
+  last_cycle: number | null;
+}
+
+/** Leases this operator currently produces, with last-12mo oil/gas + well count. */
+export async function getOperatorLeases(
+  operatorNumber: number,
+): Promise<OperatorLease[]> {
+  const sb = getSupabaseBrowser();
+  const { data, error } = await sb.rpc("operator_leases", {
+    p_operator: operatorNumber,
+  });
+  if (error) throw new Error(`operator_leases: ${error.message}`);
+  return (data as OperatorLease[] | null) ?? [];
 }
 
 export interface PrincipalAffiliation {

@@ -7,6 +7,7 @@
 
 import { hasSupabase } from "@/lib/env";
 import { getSupabaseAdmin, getSupabaseServer } from "@/lib/supabase/server";
+import { describeError, isAbsentRelation } from "@/lib/supabase/errors";
 import {
   cleanPermissions,
   type MemberStatus,
@@ -84,7 +85,12 @@ export async function getOrgMembers(): Promise<OrgMember[]> {
       return 0;
     });
   } catch (error) {
-    console.error("getOrgMembers failed", error);
+    // This app is single-tenant and has no `org_members` table, so a missing
+    // relation is expected — return an empty roster quietly. Only an
+    // unexpected error is worth a (non-overlay) warning.
+    if (!isAbsentRelation(error)) {
+      console.warn("getOrgMembers unavailable:", describeError(error));
+    }
     return [];
   }
 }

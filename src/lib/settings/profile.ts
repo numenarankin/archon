@@ -43,34 +43,71 @@ async function signedAvatar(key: string | null): Promise<string | null> {
   return data?.signedUrl ?? null;
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Postgres/PostgREST codes that are transient and worth retrying — chiefly a
+ *  cold schema cache (PGRST002), which clears once PostgREST finishes loading. */
+function isTransient(error: unknown): boolean {
+  const code = (error as { code?: string } | null)?.code;
+  return code === "PGRST002" || code === "PGRST001" || code === "57P03";
+}
+
+/**
+ * Read the singleton profile row, retrying briefly on a transient schema-cache
+ * miss. Right after the database wakes (a paused project, a just-started local
+ * stack) PostgREST can answer with PGRST002 before its cache is warm; a couple
+ * of short retries let the first page load succeed instead of flashing an error.
+ */
+async function readProfileRow(
+  sb: Awaited<ReturnType<typeof getSupabaseServer>>
+) {
+  const DELAYS = [200, 500, 900];
+  let result = await sb.from("profile").select("name, avatar_url, phone").maybeSingle();
+  for (let i = 0; result.error && isTransient(result.error) && i < DELAYS.length; i++) {
+    await sleep(DELAYS[i]);
+    result = await sb.from("profile").select("name, avatar_url, phone").maybeSingle();
+  }
+  return result;
+}
+
 /** Load the signed-in user's profile, or empty defaults when unavailable. */
 export async function getProfile(): Promise<Profile> {
   if (!hasSupabase()) return EMPTY_PROFILE;
   try {
     const sb = await getSupabaseServer();
-    // The company name is org-level (shared by every member), so it comes from
-    // `organizations`, not the per-user profile. RLS scopes both reads to the
-    // caller: their own profile row and their own org.
-    const [{ data, error }, { data: org }] = await Promise.all([
-      sb.from("profile").select("name, avatar_url, phone").maybeSingle(),
-      sb
-        .from("organizations")
-        .select("name")
-        .maybeSingle<{ name: string | null }>(),
+    // The live schema has no `organizations` table (this app is single-org by
+    // design — see the auth note in the init migration), so company name is not
+    // sourced here; it stays empty until a home for it exists. RLS scopes the
+    // profile read to the caller's own row.
+    const [{ data, error }, user] = await Promise.all([
+      readProfileRow(sb),
+      getSessionUser(),
     ]);
     if (error) throw error;
-    const email = (await getSessionUser())?.email ?? "";
-    const companyName = org?.name ?? "";
-    if (!data) return { ...EMPTY_PROFILE, companyName, email };
+    const email = user?.email ?? "";
+    if (!data) return { ...EMPTY_PROFILE, email };
     return {
       name: (data.name ?? "").trim(),
-      companyName,
+      companyName: "",
       avatarUrl: await signedAvatar(data.avatar_url),
       phone: (data.phone ?? "").trim(),
       email,
     };
   } catch (error) {
-    console.error("getProfile failed", error);
+    // A transient cache miss that outlived the retries isn't worth an error-
+    // level overlay; warn instead. The app shell still renders with defaults.
+    console.warn("getProfile unavailable:", describeError(error));
     return EMPTY_PROFILE;
   }
+}
+
+/** Extract a readable message from an Error or a Supabase PostgrestError. */
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const e = error as { message?: string; code?: string; hint?: string };
+    if (e.message) return `${e.message}${e.code ? ` (${e.code})` : ""}`;
+    return JSON.stringify(error);
+  }
+  return String(error);
 }

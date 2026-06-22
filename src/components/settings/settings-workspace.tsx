@@ -5,18 +5,25 @@ import { cn } from "@/lib/utils";
 import { useCan } from "@/components/auth/permissions-context";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { OrganizationSection } from "@/components/settings/organization-section";
+import { IntegrationsSection } from "@/components/settings/integrations-section";
 import type { Profile } from "@/lib/settings/profile";
 import type { OrgMember } from "@/lib/settings/org";
+import type { GoogleWorkspaceSettingsView } from "@/lib/settings/integrations";
 
-type Section = "profile" | "organization";
+type Section = "profile" | "organization" | "integrations";
 
 const NAV: ReadonlyArray<{ id: Section; label: string }> = [
   { id: "profile", label: "Profile" },
   { id: "organization", label: "Organization" },
+  { id: "integrations", label: "Integrations" },
 ];
 
 function isSection(value: string | undefined): value is Section {
-  return value === "profile" || value === "organization";
+  return (
+    value === "profile" ||
+    value === "organization" ||
+    value === "integrations"
+  );
 }
 
 export function SettingsWorkspace({
@@ -24,6 +31,7 @@ export function SettingsWorkspace({
   members,
   referralCode,
   companyAddress,
+  googleSettings,
   initialSection,
   appUrl,
 }: {
@@ -31,6 +39,8 @@ export function SettingsWorkspace({
   members: OrgMember[];
   referralCode: string | null;
   companyAddress: string | null;
+  /** Redacted Google Workspace integration settings for the Integrations tab. */
+  googleSettings: GoogleWorkspaceSettingsView;
   /** Tab to open initially (e.g. from a ?section= link). */
   initialSection?: string;
   /** Public base URL (server-resolved) for the referral link. */
@@ -84,6 +94,9 @@ export function SettingsWorkspace({
             members={members}
             companyAddress={companyAddress}
           />
+        )}
+        {isAdmin && section === "integrations" && (
+          <IntegrationsSection google={googleSettings} />
         )}
       </div>
     </div>

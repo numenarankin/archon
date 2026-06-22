@@ -1,7 +1,9 @@
-import { hasSupabase } from "@/lib/env";
-import { getSupabaseServer } from "@/lib/supabase/server";
 import { addDays, toISO } from "@/lib/calendar/dates";
 import { getTasks } from "@/lib/tasks/tasks";
+import {
+  hasGoogleCalendar,
+  listGoogleCalendarEvents,
+} from "@/lib/calendar/google-calendar";
 
 /**
  * Operations calendar events — field work, maintenance, hauling, regulatory
@@ -43,63 +45,24 @@ export interface CalendarEvent {
   taskId?: string;
 }
 
-interface CalendarEventRow {
-  id: string;
-  title: string;
-  event_date: string;
-  all_day: boolean;
-  start_time: string | null;
-  end_time: string | null;
-  category: EventCategory;
-  location: string | null;
-  people: string[] | null;
-  description: string | null;
-}
-
-function mapEvent(r: CalendarEventRow): CalendarEvent {
-  return {
-    id: r.id,
-    title: r.title,
-    date: r.event_date,
-    allDay: r.all_day,
-    start: r.start_time ? r.start_time.slice(0, 5) : undefined,
-    end: r.end_time ? r.end_time.slice(0, 5) : undefined,
-    category: r.category,
-    location: r.location ?? undefined,
-    people: r.people ?? undefined,
-    description: r.description ?? undefined,
-  };
-}
-
 /** How far before / after today to load events for the month / week views. */
 const WINDOW_BEFORE_DAYS = 60;
 const WINDOW_AFTER_DAYS = 120;
 
 /**
  * Returns calendar events within a window around the current date, so month
- * and week views can page without refetching. Returns an empty list when
- * Supabase is not configured.
+ * and week views can page without refetching. Reads from the user's Google
+ * Calendar when Workspace credentials are configured; otherwise returns an
+ * empty list (the page renders an empty grid).
  */
 export async function getCalendarEvents(): Promise<CalendarEvent[]> {
-  if (!hasSupabase()) return [];
+  if (!(await hasGoogleCalendar())) return [];
 
   const today = new Date();
   const from = toISO(addDays(today, -WINDOW_BEFORE_DAYS));
   const to = toISO(addDays(today, WINDOW_AFTER_DAYS));
 
-  const sb = await getSupabaseServer();
-  const { data, error } = await sb
-    .from("calendar_events")
-    .select(
-      "id, title, event_date, all_day, start_time, end_time, category, location, people, description"
-    )
-    .gte("event_date", from)
-    .lte("event_date", to)
-    .order("event_date", { ascending: true })
-    .order("start_time", { ascending: true, nullsFirst: true });
-  if (error) throw new Error(`getCalendarEvents: ${error.message}`);
-
-  return ((data ?? []) as CalendarEventRow[]).map(mapEvent);
+  return listGoogleCalendarEvents(from, to);
 }
 
 /**

@@ -122,8 +122,11 @@ def load_table(con, table: str, cols: str, sel: str) -> int:
 
 
 def main() -> int:
+    only = set(sys.argv[1:])  # optional: only reload these tables, e.g. "operators"
     con = connect(ROOT / "parquet")
     for table, cols, sel in LOADS:
+        if only and table not in only:
+            continue
         t = time.time()
         n = load_table(con, table, cols, sel)
         print(f"  {table}: {n:,} rows in {time.time() - t:.0f}s", flush=True)

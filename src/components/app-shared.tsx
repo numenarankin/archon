@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import {
 	HomeIcon,
 	FilesIcon,
+	MailIcon,
 	CompassIcon,
 	ListTodoIcon,
 	CalendarIcon,
@@ -49,6 +50,12 @@ export const navGroups: SidebarNavGroup[] = [
 				path: "/files",
 				icon: <FilesIcon />,
 				permission: "manage_files",
+			},
+			{
+				// No dedicated permission yet — visible to everyone, like Settings.
+				title: "Email",
+				path: "/email",
+				icon: <MailIcon />,
 			},
 			{
 				title: "Archon",

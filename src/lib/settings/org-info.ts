@@ -6,6 +6,7 @@
 
 import { hasSupabase } from "@/lib/env";
 import { getSupabaseAdmin, getSupabaseServer } from "@/lib/supabase/server";
+import { describeError, isAbsentRelation } from "@/lib/supabase/errors";
 import { uniqueReferralCode } from "@/lib/auth/referral";
 
 export interface OrgInfo {
@@ -71,12 +72,17 @@ export async function ensureReferralCode(): Promise<string | null> {
       .update({ referral_code: code })
       .eq("id", orgId);
     if (updErr) {
-      console.error("ensureReferralCode update failed", updErr.message);
+      if (!isAbsentRelation(updErr)) {
+        console.warn("ensureReferralCode update failed:", updErr.message);
+      }
       return null;
     }
     return code;
   } catch (error) {
-    console.error("ensureReferralCode failed", error);
+    // No `organizations` table in this single-tenant app: expected, stay quiet.
+    if (!isAbsentRelation(error)) {
+      console.warn("ensureReferralCode unavailable:", describeError(error));
+    }
     return null;
   }
 }
@@ -95,7 +101,9 @@ export async function getOrgInfo(): Promise<OrgInfo | null> {
     if (error) throw error;
     return data ? mapOrg(data as OrgRow) : null;
   } catch (error) {
-    console.error("getOrgInfo failed", error);
+    if (!isAbsentRelation(error)) {
+      console.warn("getOrgInfo unavailable:", describeError(error));
+    }
     return null;
   }
 }

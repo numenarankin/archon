@@ -1,7 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getSupabaseServer } from "@/lib/supabase/server";
+import {
+  hasGoogleCalendar,
+  createGoogleCalendarEvent,
+  updateGoogleCalendarEvent,
+} from "@/lib/calendar/google-calendar";
 
 /** The editable fields exposed by the event modal. */
 export interface CalendarEventInput {
@@ -19,43 +23,23 @@ export interface CalendarEventInput {
   description: string;
 }
 
-/** Maps the modal's editable fields to a `calendar_events` row patch. */
-function toFields(input: CalendarEventInput) {
-  return {
-    title: input.title || "Untitled event",
-    event_date: input.date,
-    all_day: input.allDay,
-    start_time: input.allDay ? null : input.start || null,
-    end_time: input.allDay ? null : input.end || null,
-    location: input.location || null,
-    people: input.people.length ? input.people : null,
-    description: input.description || null,
-  };
-}
-
-/** Create a new event from the modal's fields. */
+/** Create a new event from the modal's fields on the user's Google Calendar. */
 export async function createCalendarEvent(
   input: CalendarEventInput
 ): Promise<void> {
-  const sb = await getSupabaseServer();
-  const { error } = await sb.from("calendar_events").insert({
-    category: "office",
-    ...toFields(input),
-  });
-  if (error) throw new Error(`createCalendarEvent: ${error.message}`);
+  // No Google Workspace connected: nothing to write to. The UI still closes the
+  // modal; the event simply isn't persisted until Calendar is wired up.
+  if (!(await hasGoogleCalendar())) return;
+  await createGoogleCalendarEvent(input);
   revalidatePath("/calendar");
 }
 
-/** Update an existing event's editable fields. */
+/** Update an existing Google Calendar event's editable fields. */
 export async function updateCalendarEvent(
   id: string,
   input: CalendarEventInput
 ): Promise<void> {
-  const sb = await getSupabaseServer();
-  const { error } = await sb
-    .from("calendar_events")
-    .update(toFields(input))
-    .eq("id", id);
-  if (error) throw new Error(`updateCalendarEvent: ${error.message}`);
+  if (!(await hasGoogleCalendar())) return;
+  await updateGoogleCalendarEvent(id, input);
   revalidatePath("/calendar");
 }

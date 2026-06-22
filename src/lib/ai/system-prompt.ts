@@ -83,6 +83,12 @@ context when the user has one open.
 match (with a few example APIs). Use for "how many wells…" questions.
 - operator_lookup(name?, operator_number?) → an operator's P-5 profile, officers, \
 and how many wells they operate. Search by name or number.
+- operators_by_location(city?, zip?, min_wells?, max_wells?) → operators by their \
+MAILING city/ZIP, ranked by total wells; filter by well count. Use for "operators \
+in <city>" or "operators in <ZIP> with > N wells".
+- operators_in_county(county, min_wells?) → operators that OPERATE wells in a Texas \
+county, ranked by wells operated there. Use for "operators with > N wells in \
+<county>" (well location, not mailing address).
 
 Memory & chat history
 - recall_memory(query) → durable facts/preferences the user asked you to \

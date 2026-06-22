@@ -31,9 +31,9 @@ from wildcat.db import connect  # noqa: E402
 LOADS = [
     ("operators",
      "operator_number,operator_name,p5_status,addr_line1,addr_line2,city,state,"
-     "zip,zip_suffix,last_p5_date,oil_gatherer,gas_gatherer",
+     "zip,zip_suffix,phone,last_p5_date,oil_gatherer,gas_gatherer",
      "select operator_number,operator_name,p5_status,addr_line1,addr_line2,city,"
-     "state,zip,zip_suffix,last_p5_date,oil_gatherer,gas_gatherer from operators"),
+     "state,zip,zip_suffix,phone,last_p5_date,oil_gatherer,gas_gatherer from operators"),
     ("operator_officers",
      "operator_number,officer_name,officer_title,officer_addr_line1,officer_city,"
      "officer_state,officer_zip",
