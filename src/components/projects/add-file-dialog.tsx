@@ -13,6 +13,7 @@ import {
   FolderIcon,
   ChevronRightIcon,
   ActivityIcon,
+  ShapesIcon,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ const TYPE_ICON: Record<KBFileType, LucideIcon> = {
   url: LinkIcon,
   image: ImageIcon,
   las: ActivityIcon,
+  diagram: ShapesIcon,
 };
 
 /** Flatten the whole repo so selected ids can be resolved to files. */

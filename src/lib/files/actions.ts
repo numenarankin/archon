@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { marked } from "marked";
 import { getSupabaseAdmin, getSupabaseServer } from "@/lib/supabase/server";
 import { embedFile } from "@/lib/ai/retrieval";
+import { syncBridgesFromContent } from "@/lib/files/graph-actions";
 import type { KBFileType } from "@/lib/kb/types";
 
 const BUCKET = "files";
@@ -196,6 +197,14 @@ export async function saveDoc(fileId: string, content: string): Promise<void> {
     .update({ content })
     .eq("id", fileId);
   if (error) throw new Error(`saveDoc: ${error.message}`);
+
+  // Reconcile the document's @-mention / footnote citations ("bridges") with its
+  // saved body — the editor is the source of truth for content-authored links.
+  try {
+    await syncBridgesFromContent(fileId, content);
+  } catch (error) {
+    console.error("syncBridgesFromContent (saveDoc) failed", error);
+  }
 
   // Keep the search index in sync so Archon can find authored/edited docs.
   try {

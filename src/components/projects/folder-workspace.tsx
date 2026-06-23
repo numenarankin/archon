@@ -14,6 +14,7 @@ import {
   UploadIcon,
   FilesIcon,
   FilePlusIcon,
+  ShapesIcon,
   Loader2Icon,
 } from "lucide-react";
 import { Group, Panel, Separator } from "react-resizable-panels";
@@ -32,6 +33,13 @@ const FilePreview = dynamic(
   () => import("@/components/files/file-preview").then((m) => m.FilePreview),
   { ssr: false }
 );
+
+// tldraw needs the DOM, so the diagram canvas is client-only too.
+const DiagramCanvas = dynamic(
+  () =>
+    import("@/components/diagrams/diagram-canvas").then((m) => m.DiagramCanvas),
+  { ssr: false }
+);
 import { ChatHistory } from "@/components/projects/chat-history";
 import { ChatPanel } from "@/components/ai/chat-panel";
 import { SetPageBreadcrumb } from "@/components/breadcrumb-context";
@@ -47,6 +55,7 @@ import {
   saveDoc,
   uploadFiles,
 } from "@/lib/files/actions";
+import { createDiagram } from "@/lib/diagrams/actions";
 import type { KBFile, RepoFolder } from "@/lib/kb/types";
 
 interface FolderWorkspaceProps {
@@ -59,6 +68,11 @@ interface FolderWorkspaceProps {
 /** Markdown / note docs are edited inline; everything else previews. */
 function isEditable(file: KBFile | null): boolean {
   return file?.type === "md" || file?.type === "note";
+}
+
+/** Diagrams open onto the tldraw canvas, which loads its own content. */
+function isDiagram(file: KBFile | null): boolean {
+  return file?.type === "diagram";
 }
 
 export function FolderWorkspace({
@@ -126,6 +140,13 @@ export function FolderWorkspace({
       setPreviewUrl(null);
       return;
     }
+    // Diagrams self-load on the canvas — no doc body or signed URL to fetch.
+    if (isDiagram(selectedFile)) {
+      setContent("");
+      setPreviewUrl(null);
+      setLoadingContent(false);
+      return;
+    }
     let cancelled = false;
     setLoadingContent(true);
     const load = isEditable(selectedFile)
@@ -157,7 +178,7 @@ export function FolderWorkspace({
     setAiSelection(
       selectedFile
         ? {
-            kind: "file",
+            kind: selectedFile.type === "diagram" ? "diagram" : "file",
             id: selectedFile.id,
             name: selectedFile.name,
             fileType: selectedFile.type,
@@ -227,6 +248,26 @@ export function FolderWorkspace({
         router.refresh();
       } catch (error) {
         console.error("Failed to create note", error);
+      }
+    });
+  }
+
+  function handleNewDiagram() {
+    startTransition(async () => {
+      try {
+        const { id } = await createDiagram(folderId);
+        const diagram: KBFile = {
+          id,
+          name: "Untitled.diagram",
+          path: "Untitled.diagram",
+          type: "diagram",
+          folder_id: folderId,
+        };
+        setFiles((prev) => [diagram, ...prev]);
+        setSelectedFile(diagram);
+        router.refresh();
+      } catch (error) {
+        console.error("Failed to create diagram", error);
       }
     });
   }
@@ -330,6 +371,17 @@ export function FolderWorkspace({
                       <FilePlusIcon className="size-4 text-tertiary-text" />
                       New note
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        handleNewDiagram();
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left ty-body-2 text-primary-text hover:bg-background-subtle"
+                    >
+                      <ShapesIcon className="size-4 text-tertiary-text" />
+                      New diagram
+                    </button>
                   </div>
                 </>
               )}
@@ -374,6 +426,14 @@ export function FolderWorkspace({
           <div className="flex h-full min-h-0 flex-col bg-background">
             {!selectedFile ? (
               <Centered>Select a file to start editing.</Centered>
+            ) : isDiagram(selectedFile) ? (
+              <div className="flex h-full min-h-0 flex-col p-4">
+                <DiagramCanvas
+                  key={selectedFile.id}
+                  fileId={selectedFile.id}
+                  name={selectedFile.name}
+                />
+              </div>
             ) : loadingContent ? (
               <Centered>Loading…</Centered>
             ) : isEditable(selectedFile) ? (

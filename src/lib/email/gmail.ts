@@ -172,6 +172,181 @@ export async function listGmailMessages(): Promise<Message[]> {
   return perFolder.flat();
 }
 
+/** Encode a UTF-8 string as base64url — Gmail's `raw` message wire format. */
+function toBase64Url(raw: string): string {
+  return Buffer.from(raw, "utf-8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/** Which folder a message belongs to, inferred from its Gmail labels. */
+function folderFromLabels(labels: string[] = []): FolderId {
+  if (labels.includes("TRASH")) return "trash";
+  if (labels.includes("DRAFT")) return "drafts";
+  if (labels.includes("SENT")) return "sent";
+  if (labels.includes("INBOX")) return "inbox";
+  return "archive";
+}
+
+/**
+ * Filters for a lightweight inbox query. Everything is optional; an empty filter
+ * returns recent mail across all folders. Each field maps onto one of Gmail's
+ * own search operators, so the filtering happens server-side and only the
+ * matching messages are ever fetched.
+ */
+export interface EmailFilters {
+  folder?: FolderId;
+  /** Free-text keywords (matched in subject + body by Gmail). */
+  query?: string;
+  /** Sender name or address substring (Gmail `from:`). */
+  from?: string;
+  /** Recipient name or address substring (Gmail `to:`). */
+  to?: string;
+  unreadOnly?: boolean;
+  starredOnly?: boolean;
+  hasAttachment?: boolean;
+  /** Only messages on/after this date, `YYYY-MM-DD`. */
+  after?: string;
+  /** Only messages before this date, `YYYY-MM-DD`. */
+  before?: string;
+  /** Max messages to return (default 15, capped at 50). */
+  limit?: number;
+}
+
+/** A message header without its body — enough to triage, cheap to fetch. */
+export interface EmailSummary {
+  id: string;
+  folder: FolderId;
+  from: MailParticipant;
+  to: MailParticipant[];
+  subject: string;
+  snippet: string;
+  date: string;
+  read: boolean;
+  starred: boolean;
+}
+
+/** Translate structured filters into a Gmail search query string. */
+function buildGmailQuery(f: EmailFilters): string {
+  const parts: string[] = [];
+  if (f.folder) parts.push(FOLDER_QUERY[f.folder]);
+  if (f.from) parts.push(`from:${f.from}`);
+  if (f.to) parts.push(`to:${f.to}`);
+  if (f.unreadOnly) parts.push("is:unread");
+  if (f.starredOnly) parts.push("is:starred");
+  if (f.hasAttachment) parts.push("has:attachment");
+  // Gmail's date operators want YYYY/MM/DD.
+  if (f.after) parts.push(`after:${f.after.replace(/-/g, "/")}`);
+  if (f.before) parts.push(`before:${f.before.replace(/-/g, "/")}`);
+  if (f.query) parts.push(f.query);
+  return parts.join(" ").trim();
+}
+
+const METADATA_HEADERS =
+  "metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date";
+
+/**
+ * Search the mailbox with structured filters and return lightweight summaries
+ * (headers + snippet, no bodies). This is the cheap path for the assistant:
+ * Gmail does the filtering server-side and we fetch only `metadata` for the
+ * matches, so "unread from Dana this week" pulls a handful of headers instead of
+ * every message body. Use `getEmail(id)` to read one in full.
+ */
+export async function searchEmails(
+  filters: EmailFilters = {}
+): Promise<EmailSummary[]> {
+  const token = await getGoogleAccessToken();
+  const limit = Math.min(Math.max(filters.limit ?? 15, 1), 50);
+  const q = buildGmailQuery(filters);
+
+  const list = (await authedFetch(
+    `/messages?maxResults=${limit}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
+    token
+  )) as { messages?: { id: string }[] };
+
+  const ids = (list.messages ?? []).map((m) => m.id);
+  const full = await Promise.all(
+    ids.map(
+      (id) =>
+        authedFetch(
+          `/messages/${id}?format=metadata&${METADATA_HEADERS}`,
+          token
+        ) as Promise<GmailMessage>
+    )
+  );
+
+  return full.map((msg) => ({
+    id: msg.id,
+    folder: folderFromLabels(msg.labelIds),
+    from: parseParticipant(header(msg.payload, "From")),
+    to: parseParticipants(header(msg.payload, "To")),
+    subject: header(msg.payload, "Subject") || "(no subject)",
+    snippet: msg.snippet ?? "",
+    date: msg.internalDate
+      ? new Date(Number(msg.internalDate)).toISOString()
+      : new Date().toISOString(),
+    read: !(msg.labelIds ?? []).includes("UNREAD"),
+    starred: (msg.labelIds ?? []).includes("STARRED"),
+  }));
+}
+
+/** Read one message in full (headers + plain-text body + attachment names). */
+export async function getEmail(id: string): Promise<Message> {
+  const token = await getGoogleAccessToken();
+  const msg = (await authedFetch(
+    `/messages/${id}?format=full`,
+    token
+  )) as GmailMessage;
+  return mapGmailMessage(folderFromLabels(msg.labelIds), msg);
+}
+
+export interface DraftGmailInput {
+  /** Recipient(s); may be blank for a draft the user will address later. */
+  to?: string;
+  subject: string;
+  body: string;
+}
+
+/**
+ * Create a Gmail draft — this NEVER sends. The draft lands in the user's Drafts
+ * folder for them to review, edit, and send by hand. Deliberate: the assistant
+ * can compose mail, but a human is always the one to actually send it.
+ */
+export async function createGmailDraft(
+  input: DraftGmailInput
+): Promise<{ id: string }> {
+  const creds = await getGoogleCredentials();
+  if (!creds) throw new Error("Google Workspace is not configured.");
+  const token = await getGoogleAccessToken(creds);
+
+  const lines = [`From: ${creds.userEmail}`];
+  if (input.to) lines.push(`To: ${input.to}`);
+  lines.push(
+    `Subject: ${input.subject}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    input.body
+  );
+  const raw = toBase64Url(lines.join("\r\n"));
+
+  const res = await fetch(`${GMAIL_API}/drafts`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ message: { raw } }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Gmail draft failed (${res.status}): ${detail}`);
+  }
+  const data = (await res.json()) as { id?: string };
+  return { id: data.id ?? "" };
+}
+
 export interface SendGmailInput {
   to: string;
   subject: string;
@@ -194,11 +369,7 @@ export async function sendGmailMessage(input: SendGmailInput): Promise<void> {
     input.body,
   ].join("\r\n");
 
-  const encoded = Buffer.from(raw, "utf-8")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const encoded = toBase64Url(raw);
 
   const res = await fetch(`${GMAIL_API}/messages/send`, {
     method: "POST",

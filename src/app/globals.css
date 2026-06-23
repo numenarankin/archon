@@ -214,3 +214,22 @@
   height: 0;
   pointer-events: none;
 }
+/* Knowledge-graph citations ("bridges"): inline @-mention chip + footnote marker. */
+.kb-bridge {
+  color: var(--primary);
+  text-decoration: none;
+  border-radius: 0.25rem;
+  padding: 0 0.15rem;
+  background: color-mix(in oklab, var(--primary) 12%, transparent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.kb-bridge:hover {
+  background: color-mix(in oklab, var(--primary) 22%, transparent);
+}
+.kb-bridge-footnote {
+  font-size: 0.7em;
+  font-weight: 600;
+  vertical-align: super;
+  padding: 0 0.1rem;
+}

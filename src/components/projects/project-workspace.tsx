@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { slugify } from "@/lib/slug";
 import { FileBrowser } from "@/components/files/file-browser";
+import { KnowledgeGraphView } from "@/components/kb/knowledge-graph-view";
 import { ProjectBudgetTable } from "@/components/projects/project-budget-table";
 import { TasksBoard } from "@/components/tasks/tasks-board";
 import { SetPageBreadcrumb } from "@/components/breadcrumb-context";
@@ -13,11 +14,12 @@ import { renameFolder } from "@/lib/files/actions";
 import type { RepoFolder } from "@/lib/kb/types";
 import type { Task } from "@/lib/tasks/tasks";
 
-type ProjectTab = "tasks" | "files" | "budget";
+type ProjectTab = "tasks" | "files" | "knowledge-graph" | "budget";
 
 const TABS: { value: ProjectTab; label: string }[] = [
   { value: "tasks", label: "Tasks" },
-  { value: "files", label: "Files" },
+  { value: "files", label: "Folders" },
+  { value: "knowledge-graph", label: "Graph" },
   { value: "budget", label: "Budget" },
 ];
 
@@ -115,6 +117,12 @@ export function ProjectWorkspace({
       {tab === "files" && (
         <div className={cn("flex min-h-0 flex-1 flex-col pb-4 md:pb-6", GUTTER)}>
           <FileBrowser root={projectTree} />
+        </div>
+      )}
+
+      {tab === "knowledge-graph" && (
+        <div className={cn("flex min-h-0 flex-1 flex-col pb-4 md:pb-6", GUTTER)}>
+          <KnowledgeGraphView folderId={folderId} />
         </div>
       )}
 

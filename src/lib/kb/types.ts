@@ -13,7 +13,8 @@ export type KBFileType =
   | "note"
   | "url"
   | "image"
-  | "las";
+  | "las"
+  | "diagram";
 
 export interface KBFile {
   id: string;
@@ -51,4 +52,60 @@ export interface RepoFolder {
   folders: RepoFolder[];
   files: RepoFile[];
   modified: string;
+}
+
+// ── Knowledge graph ──────────────────────────────────────────────────────────
+
+/** Who created a graph connection — a person, or the AI on explicit request. */
+export type GraphAuthor = "user" | "ai";
+
+/** How a citation was made: inline @-mention, or a footnote reference. */
+export type BridgeKind = "cite" | "footnote";
+
+/** A directed citation from one document to another. */
+export interface Bridge {
+  id: string;
+  sourceFileId: string;
+  targetFileId: string;
+  kind: BridgeKind;
+  anchor: string | null;
+  note: string | null;
+  createdBy: GraphAuthor;
+}
+
+/** A topic area applied to files. */
+export interface Tag {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+/** A file decorated with its tags, for graph rendering. */
+export interface GraphNode {
+  id: string;
+  name: string;
+  type: KBFileType;
+  tags: Tag[];
+}
+
+/** A bridge edge between two graph nodes. */
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: BridgeKind;
+  createdBy: GraphAuthor;
+}
+
+/** The bridge/tag graph for a folder (or the whole corpus). */
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+/** A file match surfaced by the @-mention picker. */
+export interface MentionCandidate {
+  id: string;
+  name: string;
+  type: KBFileType;
 }

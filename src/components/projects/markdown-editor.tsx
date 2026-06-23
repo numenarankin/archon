@@ -6,6 +6,8 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { EditorToolbar } from "@/components/kb/editor-toolbar";
+import { BridgeMention } from "@/components/kb/bridge-mention";
+import { useMentions } from "@/components/kb/use-mentions";
 
 interface MarkdownEditorProps {
   fileId: string;
@@ -29,6 +31,8 @@ interface MarkdownEditorProps {
   title?: string;
   /** Click-to-edit rename; called with the new name on commit. */
   onRenameTitle?: (name: string) => void;
+  /** Scope the @-mention / footnote citation picker to a project folder. */
+  folderId?: string;
 }
 
 export function MarkdownEditor({
@@ -39,12 +43,16 @@ export function MarkdownEditor({
   embedded = false,
   title,
   onRenameTitle,
+  folderId,
 }: MarkdownEditorProps) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
+
+  // Citation picker (@-mentions inline + footnotes from the toolbar).
+  const mentions = useMentions({ fileId, folderId });
 
   const editor = useEditor({
     extensions: [
@@ -63,9 +71,15 @@ export function MarkdownEditor({
         openOnClick: false,
         HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" },
       }),
+      BridgeMention,
     ],
     content: initialContent,
+    editorProps: {
+      // Let the open citation picker consume arrow/enter/escape keys.
+      handleKeyDown: (view, event) => mentions.handleKeyDown(view, event),
+    },
     onUpdate: ({ editor }) => {
+      mentions.handleUpdate(editor);
       if (timerRef.current) clearTimeout(timerRef.current);
       const html = editor.getHTML();
       if (debounceMs <= 0) {
@@ -76,8 +90,13 @@ export function MarkdownEditor({
         onChangeRef.current(html);
       }, debounceMs);
     },
+    onSelectionUpdate: ({ editor }) => mentions.handleUpdate(editor),
     immediatelyRender: false,
   });
+
+  const onFootnote = editor
+    ? () => mentions.triggerFootnote(editor)
+    : undefined;
 
   // Flush any pending save when the file changes or the editor unmounts.
   useEffect(() => {
@@ -110,11 +129,12 @@ export function MarkdownEditor({
     return (
       <div className="flex flex-col">
         <div className="sticky top-0 z-10 bg-[#141414]">
-          <EditorToolbar editor={editor} />
+          <EditorToolbar editor={editor} onFootnote={onFootnote} />
         </div>
         <div className="mx-auto w-full max-w-[760px] px-8 py-6">
           <EditorContent editor={editor} />
         </div>
+        {mentions.popup}
       </div>
     );
   }
@@ -123,7 +143,7 @@ export function MarkdownEditor({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 border-b border-border pr-3">
         <div className="min-w-0 flex-1">
-          <EditorToolbar editor={editor} />
+          <EditorToolbar editor={editor} onFootnote={onFootnote} />
         </div>
         {title !== undefined && onRenameTitle && (
           <EditableTitle value={title} onCommit={onRenameTitle} />
@@ -134,6 +154,7 @@ export function MarkdownEditor({
           <EditorContent editor={editor} />
         </div>
       </div>
+      {mentions.popup}
     </div>
   );
 }

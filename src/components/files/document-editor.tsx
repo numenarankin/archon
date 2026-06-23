@@ -137,6 +137,7 @@ export function DocumentEditor({
             fileId={file.id}
             initialContent={content}
             onChange={handleContentChange}
+            folderId={file.folder_id !== "root" ? file.folder_id : undefined}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center">

@@ -65,6 +65,29 @@ TSV table or LAS log): its columns/curves and per-column statistics. Use for \
 - get_curve_data(fileId, curve, depthFrom?, depthTo?) → samples from one column/ \
 curve of a structured data file, for computing on the real numbers. Call \
 describe_dataset first to see what's available.
+- read_diagram(fileId) → a drawn diagram's structure: its title, nodes (with \
+labels), the connections between them (direction + labels), and groups. Use for \
+any question about a flowchart, process, org chart, or sketch. The selected \
+diagram's id is in the page context when one is open.
+
+Knowledge graph (how documents connect)
+- search_by_tag(tag) → the documents tagged with a topic area (tags group files \
+by subject across folders). Use to gather everything on a topic before answering.
+- get_bridges(fileId) → a document's citations: which docs it cites ("bridges"), \
+which cite it (backlinks), and its tags. After finding a relevant document, \
+follow its bridges to pull in connected context — this gets more valuable as the \
+file corpus grows.
+
+Email & calendar (the user's connected Google Workspace)
+- search_emails(folder?, query?, from?, to?, unreadOnly?, starredOnly?, \
+hasAttachment?, after?, before?, limit?) → the EFFICIENT way to answer mail \
+questions: Gmail filters server-side and only matching headers come back (no \
+bodies), so triage and filter-by-person are cheap. Always narrow with filters \
+rather than pulling everything. Dates are YYYY-MM-DD.
+- read_email(id) → one email in full (body + attachments). Use only after \
+search_emails has picked out which message(s) matter.
+- list_calendar_events(from?, to?) → events in a date range (defaults to the \
+next 14 days). Use for "what's on my calendar" / scheduling questions.
 
 Web
 - web_search(query) → search the public internet for current, external \
@@ -104,14 +127,40 @@ Actions (these change data; the app asks the user to approve each before it runs
 add a kanban task. status ∈ planned|priority|doing|done; priority ∈ \
 Low|Medium|High.
 - create_document(name, content) → (only inside a project) write a new Markdown \
-document into the project's files; it is saved and indexed for search.`;
+document into the project's files; it is saved and indexed for search.
+- create_diagram(name, spec) → draw a new diagram on a canvas from a structured \
+spec (nodes + connections; layout is automatic). Use to diagram a process/flow/ \
+org chart, or to turn an uploaded photo or sketch into an editable diagram.
+- edit_diagram(fileId, ops) → add/remove nodes or connections in an existing \
+diagram, or rename it. Call read_diagram first to see the node ids.
+- add_tag(fileId, tag) → tag a document with a topic area. ONLY when the user \
+explicitly asks you to tag/label a document — never on your own initiative.
+- add_bridge(sourceFileId, targetFileId, note?) → cite/link one document from \
+another. ONLY when the user explicitly asks you to link, cite, or connect two \
+documents — never on your own initiative.
+- draft_email(subject, body, to?) → compose an email and SAVE IT AS A DRAFT for \
+the user to send. You never send mail yourself — only a human sends. Use this \
+whenever asked to write or reply to an email.
+- create_calendar_event(title, date, allDay?, start?, end?, location?, people?, \
+description?) → add an event to the user's calendar. date is YYYY-MM-DD; for a \
+timed event set allDay=false with start/end as HH:MM.
+- update_calendar_event(id, …same fields) → edit an existing event (id from \
+list_calendar_events).`;
 
 /** High-level map of how the data is organized. */
 const DATA_LAYOUT = `Data layout:
 - Files: a folder tree of documents; their text is searchable via \
 search_documents once indexed, and structured data files (CSV/LAS) can be parsed \
-with describe_dataset / get_curve_data.
+with describe_dataset / get_curve_data. Documents also form a knowledge graph: \
+topic tags group them, and "bridges" cite one document from another (search_by_tag \
+/ get_bridges to read; add_tag / add_bridge to write, only on explicit request).
+- Diagrams: tldraw canvases that live in the file tree as files (type "diagram"). \
+Read their structure with read_diagram; they are searchable like other documents. \
+Create them with create_diagram and modify them with edit_diagram.
 - Tasks: a kanban board (Planned / Priority / Doing / Done).
+- Email & calendar: the user's connected Google Workspace mailbox (search_emails \
+/ read_email, draft via draft_email) and Google Calendar (list_calendar_events, \
+create/update events).
 - Memory & chat history: durable user preferences (recall_memory / remember) and \
 the transcripts of past conversations (search_chat_history / read_conversation).`;
 

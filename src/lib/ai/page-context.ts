@@ -6,9 +6,9 @@
  */
 import { useMapAiContext } from "@/lib/ai/map-context";
 
-/** A file, folder, or well the user currently has selected / open. */
+/** A file, folder, diagram, or well the user currently has selected / open. */
 export interface AiSelection {
-  kind: "file" | "folder" | "well";
+  kind: "file" | "folder" | "well" | "diagram";
   id: string;
   name: string;
   /** File type (pdf, image, md, …) when `kind` is "file". */
@@ -64,6 +64,13 @@ export function buildPageContext(
   } else if (selection?.kind === "folder") {
     parts.push(
       `They are browsing the folder "${selection.name}" — folder id: ${selection.id}.`
+    );
+  } else if (selection?.kind === "diagram") {
+    parts.push(
+      `They have the diagram "${selection.name}" open on the canvas — diagram ` +
+        `file id: ${selection.id}. If they say "this diagram", "the diagram", or ` +
+        `ask about what's drawn without naming one, call read_diagram with id ` +
+        `"${selection.id}". To change it, use edit_diagram with that id.`
     );
   } else if (selection?.kind === "well") {
     parts.push(

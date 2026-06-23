@@ -12,6 +12,7 @@ import {
   ListOrderedIcon,
   QuoteIcon,
   LinkIcon,
+  SuperscriptIcon,
   Undo2Icon,
   Redo2Icon,
   type LucideIcon,
@@ -20,6 +21,8 @@ import { cn } from "@/lib/utils";
 
 interface EditorToolbarProps {
   editor: Editor;
+  /** Open the footnote citation picker; omitted when citations are disabled. */
+  onFootnote?: () => void;
 }
 
 interface ToolButtonProps {
@@ -61,7 +64,7 @@ function Divider() {
   return <span className="mx-1 h-5 w-px shrink-0 bg-border" />;
 }
 
-export function EditorToolbar({ editor }: EditorToolbarProps) {
+export function EditorToolbar({ editor, onFootnote }: EditorToolbarProps) {
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border px-3 py-1.5">
       <ToolButton
@@ -154,6 +157,16 @@ export function EditorToolbar({ editor }: EditorToolbarProps) {
         }}
         isActive={editor.isActive("link")}
       />
+      {onFootnote && (
+        <>
+          <Divider />
+          <ToolButton
+            icon={SuperscriptIcon}
+            label="Cite a document (footnote)"
+            onClick={onFootnote}
+          />
+        </>
+      )}
     </div>
   );
 }

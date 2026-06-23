@@ -37,7 +37,12 @@ export async function embedFile(fileId: string): Promise<void> {
     .maybeSingle();
   if (!file) return;
 
-  let text = (file.content || file.derived_content || "").trim();
+  // For diagrams, `content` is the tldraw snapshot JSON (noise to a model);
+  // the searchable text is the generated graph description in `derived_content`.
+  let text =
+    file.type === "diagram"
+      ? (file.derived_content || "").trim()
+      : (file.content || file.derived_content || "").trim();
 
   // No text yet but we have stored bytes for a PDF/image → OCR it, persist the
   // derived text, and index that.

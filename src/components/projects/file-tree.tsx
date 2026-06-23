@@ -10,6 +10,7 @@ import {
   FolderOpenIcon,
   ImageIcon,
   LinkIcon,
+  ShapesIcon,
   StickyNoteIcon,
 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
@@ -31,6 +32,7 @@ const FILE_ICONS: Record<KBFileType, ReactNode> = {
   url: <LinkIcon className="h-3.5 w-3.5 text-secondary-text" />,
   image: <ImageIcon className="h-3.5 w-3.5 text-success/80" />,
   las: <ActivityIcon className="h-3.5 w-3.5 text-data-accent/80" />,
+  diagram: <ShapesIcon className="h-3.5 w-3.5 text-data-accent/80" />,
 };
 
 const KB_FILE_DND = "kb-file";

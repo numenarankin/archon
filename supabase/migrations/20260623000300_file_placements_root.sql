@@ -1,0 +1,11 @@
+-- 20260623000300_file_placements_root.sql
+-- Allow a file to live at the (synthetic) ROOT of the file tree.
+--
+-- getFilesRoot() (src/lib/kb/files.ts) already models root as a NULL folder_id
+-- ("p.folder_id ? nodes.get(p.folder_id) : root"), and moveFile /
+-- addFilesToFolder already branch on `folder_id is null`. But the original
+-- files migration declared file_placements.folder_id NOT NULL, which made it
+-- impossible to actually CREATE a file at root (createDoc / createDiagram /
+-- uploadFiles all insert resolveFolderId("root") === null and hit the
+-- constraint). Drop NOT NULL so the write side matches the read side.
+alter table file_placements alter column folder_id drop not null;

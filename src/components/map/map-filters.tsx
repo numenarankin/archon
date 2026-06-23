@@ -13,8 +13,10 @@ import {
 } from "@/components/ui/select";
 import { searchOperators, type OperatorMatch } from "@/lib/wells/queries";
 import { COUNTY_OPTIONS } from "@/lib/wells/counties";
+import type { ColorMode } from "@/lib/wells/graph-style";
+import type { NetworkRole } from "@/lib/wells/network";
 
-export type MapMode = "wells" | "operators";
+export type MapMode = "wells" | "operators" | "network";
 
 export interface Filters {
   mode: MapMode;
@@ -26,6 +28,13 @@ export interface Filters {
   // operator mode: well-count range (null = unbounded)
   minWells: number | null;
   maxWells: number | null;
+  // network mode: hub role filter, node color encoding, focused-person seed,
+  // and a minimum-wells floor that drops the tiny-operator tail.
+  // The operator + county fields double as the operator/county seeds.
+  networkRole: NetworkRole;
+  networkColor: ColorMode;
+  networkPerson: string | null;
+  networkMinWells: number;
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -37,6 +46,10 @@ export const DEFAULT_FILTERS: Filters = {
   operator: null,
   minWells: null,
   maxWells: null,
+  networkRole: "all",
+  networkColor: "type",
+  networkPerson: null,
+  networkMinWells: 20,
 };
 
 const DISTRICTS = Array.from({ length: 14 }, (_, i) => i + 1);
@@ -128,6 +141,7 @@ export function MapFilters({
           options={[
             { label: "Wells", v: "wells" },
             { label: "Operators", v: "operators" },
+            { label: "Network", v: "network" },
           ]}
         />
       </Field>
@@ -158,6 +172,64 @@ export function MapFilters({
         </Field>
       ) : (
         <>
+          {filters.mode === "network" && (
+            <>
+              <Field label="Hub role">
+                <Seg
+                  value={filters.networkRole}
+                  onSelect={(v) => set({ networkRole: v })}
+                  options={[
+                    { label: "All", v: "all" },
+                    { label: "Filing", v: "filing" },
+                    { label: "Agent", v: "agent" },
+                  ]}
+                />
+              </Field>
+
+              <Field label="Color by">
+                <Seg
+                  value={filters.networkColor}
+                  onSelect={(v) => set({ networkColor: v })}
+                  options={[
+                    { label: "Type", v: "type" },
+                    { label: "Status", v: "status" },
+                    { label: "Role", v: "role" },
+                  ]}
+                />
+              </Field>
+
+              <Field label="Min wells per operator">
+                <Input
+                  type="number"
+                  min={0}
+                  inputMode="numeric"
+                  value={filters.networkMinWells}
+                  placeholder="0"
+                  onChange={(e) => set({ networkMinWells: parseCount(e.target.value) ?? 0 })}
+                  className="h-8"
+                />
+              </Field>
+
+              {filters.networkPerson && (
+                <Field label="Focused person">
+                  <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-2 py-1.5 text-sm">
+                    <span className="truncate">{filters.networkPerson}</span>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="Clear person"
+                      onClick={() => set({ networkPerson: null })}
+                    >
+                      <X className="size-3" />
+                    </Button>
+                  </div>
+                </Field>
+              )}
+            </>
+          )}
+
+          {filters.mode === "wells" && (
+            <>
           <Field label="Type">
             <Seg
               value={filters.oilGas}
@@ -200,6 +272,8 @@ export function MapFilters({
               </SelectContent>
             </Select>
           </Field>
+            </>
+          )}
 
           <Field label="County">
             {countyName ? (

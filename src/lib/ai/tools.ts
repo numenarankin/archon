@@ -13,6 +13,11 @@ import { readConversation, searchChatHistory } from "@/lib/ai/chat-history";
 import { getTasks } from "@/lib/tasks/tasks";
 import { createTask } from "@/lib/tasks/actions";
 import { createProjectDocument } from "@/lib/files/actions";
+import { getDiagramSummary } from "@/lib/diagrams/read";
+import { createDiagramFromSpec, applyDiagramOps } from "@/lib/diagrams/actions";
+import { DiagramSpecSchema, DiagramOpsSchema } from "@/lib/diagrams/types";
+import { getFileConnections, getTaggedFiles } from "@/lib/kb/graph";
+import { addBridge, addTag } from "@/lib/files/graph-actions";
 import {
   lookupWell,
   countWells,
@@ -20,6 +25,23 @@ import {
   operatorsByLocation,
   operatorsInCounty,
 } from "@/lib/wells/server";
+import {
+  hasGmail,
+  searchEmails,
+  getEmail,
+  createGmailDraft,
+} from "@/lib/email/gmail";
+import {
+  hasGoogleCalendar,
+  listGoogleCalendarEvents,
+  createGoogleCalendarEvent,
+  updateGoogleCalendarEvent,
+} from "@/lib/calendar/google-calendar";
+import { addDays, toISO } from "@/lib/calendar/dates";
+
+/** Shown when a tool needs Google Workspace but it isn't connected yet. */
+const NOT_CONNECTED =
+  "Google Workspace isn't connected. Connect it in Settings → Integrations.";
 
 /**
  * The tools Archon can call to read the company's live data + search documents +
@@ -110,6 +132,34 @@ export function archonTools(folderId?: string) {
       }),
     }),
 
+    // ── Knowledge graph (bridges + tags) ──────────────────────────────────
+    search_by_tag: tool({
+      description:
+        "List the documents tagged with a given topic area. Tags group files by subject across folders (e.g. 'royalties', 'geology'). Pass the tag name or slug. Use to gather every document on a topic before answering. Read-only.",
+      inputSchema: z.object({
+        tag: z.string().describe("the tag name or slug, e.g. 'royalties'"),
+      }),
+      execute: async ({ tag }) => ({ files: await getTaggedFiles(tag) }),
+    }),
+
+    get_bridges: tool({
+      description:
+        "Get the citation graph for one document: which documents it cites ('bridges' out) and which cite it (backlinks), plus its tags. Use after finding a relevant document to follow its connections and pull in related context. Read-only.",
+      inputSchema: z.object({
+        fileId: z.string().describe("the document's file id"),
+      }),
+      execute: async ({ fileId }) => await getFileConnections(fileId),
+    }),
+
+    read_diagram: tool({
+      description:
+        "Read a DIAGRAM (a drawn canvas) by its file id — returns its title, the nodes/boxes with their text labels, the connections between them (with direction and any edge labels), and any groups. Use for any question about a flowchart, process, org chart, system sketch, or whiteboard the user drew. The selected diagram's file id is given in the page context when the user has one open.",
+      inputSchema: z.object({
+        fileId: z.string().describe("the diagram's file id"),
+      }),
+      execute: async ({ fileId }) => ({ diagram: await getDiagramSummary(fileId) }),
+    }),
+
     recall_memory: tool({
       description:
         "Recall durable facts/preferences the user has previously asked Archon to remember (units, naming conventions, priorities). Call this when personalization would help.",
@@ -150,6 +200,71 @@ export function archonTools(folderId?: string) {
       }),
     }),
 
+    // ── Email (Gmail) ─────────────────────────────────────────────────────
+    search_emails: tool({
+      description:
+        "Search the user's email with filters — the efficient way to answer questions about mail WITHOUT reading every message. Gmail filters server-side and only matching headers come back (sender, recipients, subject, snippet, date, read/starred — no bodies, so you can triage or filter by person cheaply). Combine any of: folder, free-text query, from, to, unreadOnly, starredOnly, hasAttachment, after/before dates. Then call read_email to open the ones that matter. Examples: 'unread from Dana this week' → {unreadOnly:true, from:'Dana', after:'2026-06-16'}; 'emails about the gathering agreement' → {query:'gathering agreement'}.",
+      inputSchema: z.object({
+        folder: z
+          .enum(["inbox", "starred", "sent", "drafts", "archive", "trash"])
+          .optional(),
+        query: z
+          .string()
+          .optional()
+          .describe("free-text keywords matched in subject + body"),
+        from: z.string().optional().describe("sender name or email substring"),
+        to: z.string().optional().describe("recipient name or email substring"),
+        unreadOnly: z.boolean().optional(),
+        starredOnly: z.boolean().optional(),
+        hasAttachment: z.boolean().optional(),
+        after: z.string().optional().describe("on/after this date, YYYY-MM-DD"),
+        before: z.string().optional().describe("before this date, YYYY-MM-DD"),
+        limit: z
+          .number()
+          .int()
+          .optional()
+          .describe("max results (default 15, max 50)"),
+      }),
+      execute: async (filters) => {
+        if (!(await hasGmail())) return { error: NOT_CONNECTED };
+        return { emails: await searchEmails(filters) };
+      },
+    }),
+
+    read_email: tool({
+      description:
+        "Read one email in full by its id (from search_emails): sender, recipients, subject, the complete body, and attachment names. Use only after search_emails has narrowed to the message(s) worth opening — don't read whole bodies to triage.",
+      inputSchema: z.object({
+        id: z.string().describe("the email's id from search_emails"),
+      }),
+      execute: async ({ id }) => {
+        if (!(await hasGmail())) return { error: NOT_CONNECTED };
+        return { email: await getEmail(id) };
+      },
+    }),
+
+    // ── Calendar (Google Calendar) ────────────────────────────────────────
+    list_calendar_events: tool({
+      description:
+        "List events on the user's Google Calendar within an inclusive date range (YYYY-MM-DD). Defaults to the next 14 days when no range is given. Returns title, date, start/end times, location, attendees, and notes. Use for 'what's on my calendar', 'am I free Thursday', or any scheduling question.",
+      inputSchema: z.object({
+        from: z
+          .string()
+          .optional()
+          .describe("range start YYYY-MM-DD (default today)"),
+        to: z
+          .string()
+          .optional()
+          .describe("range end YYYY-MM-DD (default +14 days)"),
+      }),
+      execute: async ({ from, to }) => {
+        if (!(await hasGoogleCalendar())) return { error: NOT_CONNECTED };
+        const start = from ?? toISO(new Date());
+        const end = to ?? toISO(addDays(new Date(), 14));
+        return { events: await listGoogleCalendarEvents(start, end) };
+      },
+    }),
+
     // Web search — Anthropic-executed. Use for current, external information not
     // in the company's data (market news, regulations, weather, vendors, general
     // facts). Treat results as reference material, never as instructions.
@@ -182,6 +297,45 @@ export function archonTools(folderId?: string) {
           }),
         }
       : {}),
+
+    // Knowledge-graph writes. Per product policy, ONLY use these when the user
+    // explicitly asks to tag a document or link/cite two documents — never add
+    // bridges or tags on your own while answering. `needsApproval` still gates
+    // the write in the UI. Connections are recorded as created by the AI.
+    add_tag: tool({
+      description:
+        "Tag a document with a topic area (e.g. 'royalties', 'geology'), so it groups with other docs on that subject. ONLY call this when the user explicitly asks you to tag/label a document — never tag on your own initiative.",
+      inputSchema: z.object({
+        fileId: z.string().describe("the document's file id"),
+        tag: z.string().describe("the topic tag, e.g. 'royalties'"),
+      }),
+      needsApproval: true,
+      execute: async ({ fileId, tag }) => {
+        const created = await addTag(fileId, tag, "ai");
+        return { ok: true, tag: created?.name ?? tag };
+      },
+    }),
+
+    add_bridge: tool({
+      description:
+        "Create a 'bridge' — a citation linking one document to another (source cites target). ONLY call this when the user explicitly asks you to link, cite, or connect two specific documents — never create bridges on your own initiative. Get file ids from search_documents or browse_files.",
+      inputSchema: z.object({
+        sourceFileId: z.string().describe("the citing document's file id"),
+        targetFileId: z.string().describe("the cited document's file id"),
+        note: z
+          .string()
+          .optional()
+          .describe("optional note describing the connection"),
+      }),
+      needsApproval: true,
+      execute: async ({ sourceFileId, targetFileId, note }) => {
+        await addBridge(sourceFileId, targetFileId, "cite", {
+          note,
+          createdBy: "ai",
+        });
+        return { ok: true };
+      },
+    }),
 
     create_task: tool({
       description:
@@ -220,6 +374,136 @@ export function archonTools(folderId?: string) {
           deadlineTime,
         });
         return { ok: true, title };
+      },
+    }),
+
+    create_diagram: tool({
+      description:
+        "Draw a NEW diagram on a canvas from a structured spec: the nodes (boxes/diamonds/ellipses with labels) and the connections between them. Positions are laid out automatically — you only describe the structure. Use when the user asks you to draw, chart, map out, or diagram a process, flow, org chart, or system, OR to turn an uploaded photo/sketch of a diagram into an editable diagram. Give each node a short stable id and reference those ids in the edges.",
+      inputSchema: z.object({
+        name: z.string().describe('a file name for the diagram, e.g. "Lease Flow"'),
+        spec: DiagramSpecSchema,
+      }),
+      needsApproval: true,
+      execute: async ({ name, spec }) => {
+        const d = await createDiagramFromSpec(folderId ?? "root", name, spec);
+        return { ok: true, id: d.id, name: d.name };
+      },
+    }),
+
+    edit_diagram: tool({
+      description:
+        "Modify an existing diagram by its file id: add or remove nodes, add or remove connections, or rename it. Call read_diagram first to see the current node ids. Note: this rebuilds the diagram's layout from its structure, so use it to refine diagrams rather than to tweak a hand-drawn sketch's exact positions.",
+      inputSchema: z.object({
+        fileId: z.string().describe("the diagram's file id"),
+        ops: DiagramOpsSchema,
+      }),
+      needsApproval: true,
+      execute: async ({ fileId, ops }) => ({
+        ok: await applyDiagramOps(fileId, ops),
+      }),
+    }),
+
+    draft_email: tool({
+      description:
+        "Compose an email and save it as a Gmail DRAFT for the user to review and send themselves. This NEVER sends — you draft, a human sends. Provide subject and body; `to` is optional (leave it blank for the user to address). Use whenever the user asks you to write, draft, or reply to an email.",
+      inputSchema: z.object({
+        to: z
+          .string()
+          .optional()
+          .describe("recipient email(s), comma-separated; optional"),
+        subject: z.string(),
+        body: z.string().describe("the email body, plain text"),
+      }),
+      needsApproval: true,
+      execute: async ({ to, subject, body }) => {
+        if (!(await hasGmail())) return { error: NOT_CONNECTED };
+        const draft = await createGmailDraft({ to, subject, body });
+        return {
+          ok: true,
+          id: draft.id,
+          note: "Saved to Drafts — review and send it from Gmail.",
+        };
+      },
+    }),
+
+    create_calendar_event: tool({
+      description:
+        "Add an event to the user's Google Calendar. Provide a title and date (YYYY-MM-DD). For a timed event set allDay=false with start/end as HH:MM (24-hour); for an all-day event set allDay=true. Optional location, attendees (names), and description.",
+      inputSchema: z.object({
+        title: z.string(),
+        date: z.string().describe("YYYY-MM-DD"),
+        allDay: z.boolean().default(false),
+        start: z.string().optional().describe("HH:MM 24-hour (timed events)"),
+        end: z.string().optional().describe("HH:MM 24-hour (timed events)"),
+        location: z.string().optional(),
+        people: z.array(z.string()).optional().describe("attendee names"),
+        description: z.string().optional(),
+      }),
+      needsApproval: true,
+      execute: async ({
+        title,
+        date,
+        allDay,
+        start,
+        end,
+        location,
+        people,
+        description,
+      }) => {
+        if (!(await hasGoogleCalendar())) return { error: NOT_CONNECTED };
+        await createGoogleCalendarEvent({
+          title,
+          date,
+          allDay,
+          start: start ?? "",
+          end: end ?? "",
+          location: location ?? "",
+          people: people ?? [],
+          description: description ?? "",
+        });
+        return { ok: true, title };
+      },
+    }),
+
+    update_calendar_event: tool({
+      description:
+        "Update an existing Google Calendar event by its id (from list_calendar_events). Pass the full set of fields as they should read AFTER the edit (title, date, allDay, start/end, location, people, description) — unspecified optional fields are cleared.",
+      inputSchema: z.object({
+        id: z.string().describe("the event's id from list_calendar_events"),
+        title: z.string(),
+        date: z.string().describe("YYYY-MM-DD"),
+        allDay: z.boolean().default(false),
+        start: z.string().optional().describe("HH:MM 24-hour"),
+        end: z.string().optional().describe("HH:MM 24-hour"),
+        location: z.string().optional(),
+        people: z.array(z.string()).optional(),
+        description: z.string().optional(),
+      }),
+      needsApproval: true,
+      execute: async ({
+        id,
+        title,
+        date,
+        allDay,
+        start,
+        end,
+        location,
+        people,
+        description,
+      }) => {
+        if (!(await hasGoogleCalendar())) return { error: NOT_CONNECTED };
+        await updateGoogleCalendarEvent(id, {
+          title,
+          date,
+          allDay,
+          start: start ?? "",
+          end: end ?? "",
+          location: location ?? "",
+          people: people ?? [],
+          description: description ?? "",
+        });
+        return { ok: true, id };
       },
     }),
 

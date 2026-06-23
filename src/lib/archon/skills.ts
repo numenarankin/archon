@@ -90,6 +90,23 @@ export const ARCHON_SKILLS: ArchonSkill[] = [
     builtIn: true,
   },
   {
+    id: "diagrams",
+    name: "Diagrams",
+    description:
+      "Read diagrams the team drew (flowcharts, processes, org charts, sketches) and answer questions about them, draw new diagrams from a description, and turn an uploaded photo of a whiteboard or sketch into an editable diagram.",
+    category: "Documents",
+    icon: "shapes",
+    tools: ["read_diagram", "create_diagram", "edit_diagram"],
+    examples: [
+      "Turn this photo of our whiteboard into a diagram.",
+      "Draw the lease acquisition workflow as a flowchart.",
+      "What does this diagram say happens after due diligence?",
+    ],
+    enabledByDefault: true,
+    requiresApproval: true,
+    builtIn: true,
+  },
+  {
     id: "tasks-scheduling",
     name: "Task Board",
     description:
@@ -133,6 +150,43 @@ export const ARCHON_SKILLS: ArchonSkill[] = [
       "What did I say my priorities were this quarter?",
     ],
     enabledByDefault: true,
+    builtIn: true,
+  },
+  {
+    id: "email",
+    name: "Email",
+    description:
+      "Search and read your Gmail with filters (sender, unread, keywords, date range) to answer questions about your mail, and draft replies for you to review and send. Archon never sends — drafts only.",
+    category: "Productivity",
+    icon: "mail",
+    tools: ["search_emails", "read_email", "draft_email"],
+    examples: [
+      "Summarize my unread inbox.",
+      "Any emails from Dana about the gathering agreement this week?",
+      "Draft a reply to Cole agreeing to the lease extension.",
+    ],
+    enabledByDefault: true,
+    requiresApproval: true,
+    builtIn: true,
+  },
+  {
+    id: "calendar",
+    name: "Calendar",
+    description:
+      "Read your Google Calendar to answer scheduling questions, and add or update events.",
+    category: "Productivity",
+    icon: "calendar",
+    tools: [
+      "list_calendar_events",
+      "create_calendar_event",
+      "update_calendar_event",
+    ],
+    examples: [
+      "What's on my calendar this week?",
+      "Schedule a tank haul-off for Thursday at 9am.",
+    ],
+    enabledByDefault: true,
+    requiresApproval: true,
     builtIn: true,
   },
 ];

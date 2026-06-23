@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   FileTextIcon,
@@ -10,6 +11,7 @@ import {
   LinkIcon,
   FileIcon,
   ActivityIcon,
+  ShapesIcon,
   FolderIcon,
   FolderPlusIcon,
   FilePlusIcon,
@@ -34,6 +36,7 @@ import {
 } from "@/components/ui/table";
 import { DocumentViewer } from "@/components/files/document-viewer";
 import { DocumentEditor } from "@/components/files/document-editor";
+import { KnowledgeGraphView } from "@/components/kb/knowledge-graph-view";
 import { useAiDrawer } from "@/lib/ai/use-ai-drawer";
 import { useAiContext } from "@/lib/ai/use-ai-context";
 import {
@@ -45,6 +48,14 @@ import {
   setPin,
   uploadFiles,
 } from "@/lib/files/actions";
+import { createDiagram } from "@/lib/diagrams/actions";
+
+// tldraw needs the DOM, so the canvas is client-only.
+const DiagramCanvas = dynamic(
+  () =>
+    import("@/components/diagrams/diagram-canvas").then((m) => m.DiagramCanvas),
+  { ssr: false }
+);
 import { MoveToFolderDialog } from "@/components/files/move-to-folder-dialog";
 import type { RepoFile, RepoFolder } from "@/lib/kb/types";
 import type { KBFileType } from "@/lib/kb/types";
@@ -58,6 +69,7 @@ const TYPE_ICON: Record<KBFileType, LucideIcon> = {
   url: LinkIcon,
   image: ImageIcon,
   las: ActivityIcon,
+  diagram: ShapesIcon,
 };
 
 interface FileBrowserProps {
@@ -82,6 +94,10 @@ function findFolder(node: RepoFolder, id: string): RepoFolder | null {
 export function FileBrowser({ root }: FileBrowserProps) {
   const router = useRouter();
   const [pathIds, setPathIds] = useState<string[]>([root.id]);
+  // At the root, the header shows Folders/Graph tabs instead of the "Files"
+  // crumb; the Graph tab swaps the file table for the knowledge graph. Once
+  // you're inside a folder it's the normal breadcrumb path (no graph).
+  const [rootTab, setRootTab] = useState<"folders" | "graph">("folders");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -102,6 +118,8 @@ export function FileBrowser({ root }: FileBrowserProps) {
     .filter((f): f is RepoFolder => f !== null);
   const path = pathFolders.length > 0 ? pathFolders : [root];
   const current = path[path.length - 1];
+  const atRoot = path.length === 1;
+  const showGraph = atRoot && rootTab === "graph";
 
   // Keep the Archon drawer aware of the active file (when viewing one) or the
   // folder being browsed. Cleared when the browser unmounts.
@@ -109,7 +127,7 @@ export function FileBrowser({ root }: FileBrowserProps) {
     setAiSelection(
       viewing
         ? {
-            kind: "file",
+            kind: viewing.type === "diagram" ? "diagram" : "file",
             id: viewing.id,
             name: viewing.name,
             fileType: viewing.type,
@@ -162,6 +180,28 @@ export function FileBrowser({ root }: FileBrowserProps) {
         });
       } catch (error) {
         console.error("Failed to create doc", error);
+      }
+    });
+  }
+
+  function handleCreateDiagram() {
+    startTransition(async () => {
+      try {
+        const { id } = await createDiagram(current.id);
+        router.refresh();
+        // Open the new diagram straight onto the canvas, in this folder.
+        setViewing({
+          id,
+          name: "Untitled.diagram",
+          path: "Untitled.diagram",
+          type: "diagram",
+          folder_id: current.id,
+          size: "",
+          modified: "",
+          pinned: false,
+        });
+      } catch (error) {
+        console.error("Failed to create diagram", error);
       }
     });
   }
@@ -260,7 +300,17 @@ export function FileBrowser({ root }: FileBrowserProps) {
     folders.length === 0 && files.length === 0 && !creatingFolder;
 
   if (viewing) {
-    // Inline docs (markdown / notes) are editable; everything else previews.
+    // Diagrams open onto the canvas; markdown / notes are editable; everything
+    // else previews. All stay inline within the current folder.
+    if (viewing.type === "diagram") {
+      return (
+        <DiagramCanvas
+          fileId={viewing.id}
+          name={viewing.name}
+          onBack={() => setViewing(null)}
+        />
+      );
+    }
     const editable = viewing.type === "md" || viewing.type === "note";
     return editable ? (
       <DocumentEditor file={viewing} onBack={() => setViewing(null)} />
@@ -277,31 +327,54 @@ export function FileBrowser({ root }: FileBrowserProps) {
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* Header: breadcrumbs + actions */}
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <nav className="flex flex-wrap items-center gap-1">
-          {path.map((folder, i) => {
-            const isLast = i === path.length - 1;
-            return (
-              <span key={folder.id} className="flex items-center gap-1">
-                {i > 0 && (
-                  <ChevronRightIcon className="size-5 text-tertiary-text" />
+        {atRoot ? (
+          // Root: Folders / Graph tabs replace the "Files" heading.
+          <nav className="flex flex-wrap items-center gap-x-6 gap-y-1">
+            {(["folders", "graph"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={rootTab === value}
+                onClick={() => setRootTab(value)}
+                className={cn(
+                  "rounded px-1.5 py-0.5 font-heading text-2xl font-semibold tracking-tight transition-colors",
+                  rootTab === value
+                    ? "text-primary-text"
+                    : "text-tertiary-text hover:text-primary-text"
                 )}
-                <button
-                  type="button"
-                  disabled={isLast}
-                  onClick={() => setPathIds(pathIds.slice(0, i + 1))}
-                  className={cn(
-                    "rounded px-1.5 py-0.5 font-heading text-2xl font-semibold tracking-tight",
-                    isLast
-                      ? "text-primary-text"
-                      : "text-tertiary-text hover:bg-background-hover hover:text-primary-text"
+              >
+                {value === "folders" ? "Folders" : "Graph"}
+              </button>
+            ))}
+          </nav>
+        ) : (
+          // Inside a folder: the normal breadcrumb path.
+          <nav className="flex flex-wrap items-center gap-1">
+            {path.map((folder, i) => {
+              const isLast = i === path.length - 1;
+              return (
+                <span key={folder.id} className="flex items-center gap-1">
+                  {i > 0 && (
+                    <ChevronRightIcon className="size-5 text-tertiary-text" />
                   )}
-                >
-                  {folder.name}
-                </button>
-              </span>
-            );
-          })}
-        </nav>
+                  <button
+                    type="button"
+                    disabled={isLast}
+                    onClick={() => setPathIds(pathIds.slice(0, i + 1))}
+                    className={cn(
+                      "rounded px-1.5 py-0.5 font-heading text-2xl font-semibold tracking-tight",
+                      isLast
+                        ? "text-primary-text"
+                        : "text-tertiary-text hover:bg-background-hover hover:text-primary-text"
+                    )}
+                  >
+                    {folder.name}
+                  </button>
+                </span>
+              );
+            })}
+          </nav>
+        )}
 
         {/*
           TODO: Special handling for PDFs and image file formats (png, jpg,
@@ -311,36 +384,42 @@ export function FileBrowser({ root }: FileBrowserProps) {
           can read the JSON/Markdown representation instead of the raw file —
           Archon is poor at reading PDFs and images directly.
         */}
-        <div className="flex items-center gap-2">
-          <Button
-            size="lg"
-            variant="outline"
-            onClick={() => {
-              setFolderDraft("");
-              setCreatingFolder(true);
-            }}
-          >
-            <FolderPlusIcon />
-            New Folder
-          </Button>
-          <Button size="lg" variant="outline" onClick={handleCreateDoc}>
-            <FilePlusIcon />
-            New Doc
-          </Button>
-          <Button
-            size="lg"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadingNames.length > 0}
-            className="bg-black text-white hover:bg-neutral-800"
-          >
-            {uploadingNames.length > 0 ? (
-              <Loader2Icon className="animate-spin" />
-            ) : (
-              <UploadIcon />
-            )}
-            {uploadingNames.length > 0 ? "Uploading…" : "Upload File"}
-          </Button>
-        </div>
+        {!showGraph && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="lg"
+              variant="outline"
+              onClick={() => {
+                setFolderDraft("");
+                setCreatingFolder(true);
+              }}
+            >
+              <FolderPlusIcon />
+              New Folder
+            </Button>
+            <Button size="lg" variant="outline" onClick={handleCreateDoc}>
+              <FilePlusIcon />
+              New Doc
+            </Button>
+            <Button size="lg" variant="outline" onClick={handleCreateDiagram}>
+              <ShapesIcon />
+              New Diagram
+            </Button>
+            <Button
+              size="lg"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingNames.length > 0}
+              className="bg-black text-white hover:bg-neutral-800"
+            >
+              {uploadingNames.length > 0 ? (
+                <Loader2Icon className="animate-spin" />
+              ) : (
+                <UploadIcon />
+              )}
+              {uploadingNames.length > 0 ? "Uploading…" : "Upload File"}
+            </Button>
+          </div>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -350,7 +429,13 @@ export function FileBrowser({ root }: FileBrowserProps) {
         />
       </div>
 
-      {/* File table (borderless) */}
+      {/* Graph tab swaps the file table for the knowledge graph. */}
+      {showGraph ? (
+        <div className="min-h-0 flex-1">
+          <KnowledgeGraphView />
+        </div>
+      ) : (
+      /* File table (borderless) */
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-background">
@@ -550,6 +635,7 @@ export function FileBrowser({ root }: FileBrowserProps) {
           </TableBody>
         </Table>
       </div>
+      )}
 
       {movingFile && (
         <MoveToFolderDialog

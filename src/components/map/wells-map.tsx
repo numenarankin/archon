@@ -7,7 +7,8 @@ import { WellDetailPanel } from "./well-detail-panel";
 import { OperatorDetailPanel } from "./operator-detail-panel";
 import { PrincipalDetailPanel } from "./principal-detail-panel";
 import { OperatorListPanel, type OperatorListItem } from "./operator-list-panel";
-import { MapFilters, DEFAULT_FILTERS, type Filters } from "./map-filters";
+import { NetworkScene } from "./network-scene";
+import { MapFilters, DEFAULT_FILTERS, type Filters, type MapMode } from "./map-filters";
 import { useMapAiContext } from "@/lib/ai/map-context";
 import { COUNTY_NAMES } from "@/lib/wells/counties";
 import { getFocusWells, loadOperatorPoints } from "@/lib/wells/queries";
@@ -81,7 +82,7 @@ export function WellsMap() {
     items: OperatorListItem[];
   } | null>(null);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
-  const prevModeRef = useRef<"wells" | "operators">("wells");
+  const prevModeRef = useRef<MapMode>("wells");
 
   // Selecting a well from the operator panel jumps the map + well detail to it.
   const handleSelectWell = (api: number, lng: number | null, lat: number | null) => {
@@ -446,6 +447,15 @@ export function WellsMap() {
     const setVis = (ids: string[], v: "visible" | "none") =>
       ids.forEach((id) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", v));
 
+    // NETWORK MODE: the graph overlay covers the map, so hide every map layer and
+    // skip the focus/operator queries (the operator + county fields are reused as
+    // graph seeds, not map filters here).
+    if (filters.mode === "network") {
+      setVis([...WELL_LAYERS, ...OPERATOR_LAYERS], "none");
+      prevModeRef.current = "network";
+      return;
+    }
+
     // OPERATOR MODE: operators placed by mailing ZIP, clustered, filtered by
     // well count. Click a point -> profile; click a cluster -> operator list.
     if (filters.mode === "operators") {
@@ -550,6 +560,14 @@ export function WellsMap() {
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
+      {filters.mode === "network" && (
+        <NetworkScene
+          filters={filters}
+          onChange={setFilters}
+          onSelectOperator={setSelectedOperator}
+          onSelectPrincipal={setSelectedPrincipal}
+        />
+      )}
       <MapFilters
         filters={filters}
         onChange={(f) => {
