@@ -12,20 +12,17 @@ import {
 } from "lucide-react";
 import { SwipeUpModal } from "@/components/wells/swipe-up-modal";
 import { Button } from "@/components/ui/button";
+import { TransactionForm } from "@/components/budgeting/transaction-form";
 import {
-  TransactionForm,
-  type WellOption,
-} from "@/components/accounting/transaction-form";
-import {
-  createAccountingUploadTarget,
-  discardAccountingUpload,
+  createBudgetUploadTarget,
+  discardBudgetUpload,
   saveUploadedTransactions,
-} from "@/lib/accounting/actions";
+} from "@/lib/budgeting/actions";
 import { getSupabaseBrowser } from "@/lib/supabase/client";
-import { emptyDraft } from "@/lib/accounting/derive";
+import { emptyDraft } from "@/lib/budgeting/derive";
 import { cn } from "@/lib/utils";
-import type { Category } from "@/lib/accounting/categories";
-import type { DraftTransaction } from "@/lib/accounting/types";
+import type { Category } from "@/lib/budgeting/categories";
+import type { DraftTransaction } from "@/lib/budgeting/types";
 
 const ACCEPT = ".pdf,.csv,.xlsx,.xls,.png,.jpg,.jpeg,.gif,.webp";
 
@@ -44,11 +41,9 @@ function today(): string {
 }
 
 /**
- * Parse a response body as JSON, returning null when the body is not JSON.
- * The extract endpoint can return a non-JSON error page (e.g. a 413 from the
- * platform when the upload is too large, or a 504/HTML gateway page on
- * timeout); calling `res.json()` blindly on those throws the opaque
- * "Unexpected token '<', "<!DOCTYPE"..." SyntaxError instead of a usable error.
+ * Parse a response body as JSON, returning null when the body is not JSON (e.g.
+ * a 413 from the platform, or a 504/HTML gateway page on timeout) so the caller
+ * surfaces a usable error instead of an opaque SyntaxError.
  */
 async function readJson(
   res: Response
@@ -82,7 +77,7 @@ function normalizeDraft(raw: Partial<DraftTransaction>): DraftTransaction {
   return {
     ...base,
     ...raw,
-    kind: raw.kind === "revenue" ? "revenue" : "expense",
+    kind: raw.kind === "income" ? "income" : "expense",
     amount: Number(raw.amount) || 0,
   };
 }
@@ -90,20 +85,18 @@ function normalizeDraft(raw: Partial<DraftTransaction>): DraftTransaction {
 interface UploadTransactionsModalProps {
   open: boolean;
   onClose: () => void;
-  wells: WellOption[];
   categories: Category[];
 }
 
 /**
- * Upload an accounting document (PDF scan, image, CSV, or XLSX). The file is
- * sent to Opus 4.8 for OCR + extraction, which returns draft transactions held
- * in memory. The user reviews each via the arrows on the right, edits as needed,
- * and saves the batch to the ledger.
+ * Upload a financial document (bank/card statement, receipt, PDF, image, CSV, or
+ * XLSX). The file is sent to Opus 4.8 for OCR + extraction, which returns draft
+ * transactions held in memory. The user reviews each via the arrows on the
+ * right, edits as needed, and saves the batch to the ledger.
  */
 export function UploadTransactionsModal({
   open,
   onClose,
-  wells,
   categories,
 }: UploadTransactionsModalProps) {
   const [fileName, setFileName] = useState<string | null>(null);
@@ -127,7 +120,7 @@ export function UploadTransactionsModal({
   function handleClose() {
     if (saving) return;
     // The file was uploaded but never committed → drop the orphaned object.
-    if (upload) void discardAccountingUpload(upload.storageKey);
+    if (upload) void discardBudgetUpload(upload.storageKey);
     reset();
     onClose();
   }
@@ -139,13 +132,11 @@ export function UploadTransactionsModal({
     setDrafts([]);
     setIndex(0);
     // Replacing an earlier upload in this session → discard the old object.
-    if (upload) void discardAccountingUpload(upload.storageKey);
+    if (upload) void discardBudgetUpload(upload.storageKey);
     setUpload(null);
     try {
       // 1. Stream the file straight to private Storage via a signed upload URL.
-      //    This bypasses the serverless request-body cap that a multipart POST
-      //    to the route would hit, so large scanned PDFs go through.
-      const target = await createAccountingUploadTarget();
+      const target = await createBudgetUploadTarget();
       const { error: upErr } = await getSupabaseBrowser()
         .storage.from(target.bucket)
         .uploadToSignedUrl(target.path, target.token, file, {
@@ -162,7 +153,7 @@ export function UploadTransactionsModal({
       setUpload(uploadRef);
 
       // 2. Ask the server to OCR + extract from the stored file (reference only).
-      const res = await fetch("/api/accounting/extract", {
+      const res = await fetch("/api/budgeting/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -239,127 +230,126 @@ export function UploadTransactionsModal({
     <SwipeUpModal
       open={open}
       onClose={handleClose}
-      title="Upload Accounting File"
+      title="Upload Statement or Receipt"
       className="h-[88vh] max-w-5xl"
     >
       <div className="flex min-h-0 flex-1 flex-col">
         {/* Content: upload area (left) + draft editor (right), equal height. */}
         <div className="flex min-h-0 flex-1">
           {/* Left: file upload area */}
-        <div className="flex w-2/5 min-w-0 flex-col border-r p-5">
-          <input
-            ref={inputRef}
-            type="file"
-            accept={ACCEPT}
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleFile(f);
-              e.target.value = "";
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              const f = e.dataTransfer.files?.[0];
-              if (f) void handleFile(f);
-            }}
-            className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border p-6 text-center transition-colors hover:border-ring hover:bg-muted/40"
-          >
-            {status === "extracting" ? (
-              <Loader2Icon className="size-8 animate-spin text-muted-foreground" />
-            ) : fileName ? (
-              <FileTextIcon className="size-8 text-muted-foreground" />
-            ) : (
-              <UploadCloudIcon className="size-8 text-muted-foreground" />
-            )}
-            <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium">
-                {fileName ?? "Drop a file or click to upload"}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {status === "extracting"
-                  ? "Reading document…"
-                  : "PDF, image, CSV, or XLSX"}
-              </span>
-            </div>
-          </button>
-        </div>
-
-        {/* Right: transaction config / draft editor */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          {drafts.length > 0 && current ? (
-            <>
-              <div className="flex items-center justify-between gap-2 border-b px-5 py-3">
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Previous transaction"
-                    disabled={index === 0}
-                    onClick={() => setIndex((i) => Math.max(0, i - 1))}
-                  >
-                    <ChevronLeftIcon />
-                  </Button>
-                  <span className="min-w-24 text-center text-sm font-medium tabular-nums">
-                    {index + 1} of {drafts.length}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Next transaction"
-                    disabled={index >= drafts.length - 1}
-                    onClick={() =>
-                      setIndex((i) => Math.min(drafts.length - 1, i + 1))
-                    }
-                  >
-                    <ChevronRightIcon />
-                  </Button>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="sm" onClick={addBlankDraft}>
-                    <PlusIcon />
-                    Add
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Remove this transaction"
-                    onClick={removeDraft}
-                  >
-                    <Trash2Icon />
-                  </Button>
-                </div>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-                <TransactionForm
-                  value={current}
-                  onChange={updateDraft}
-                  wells={wells}
-                  categories={categories}
-                />
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+          <div className="flex w-2/5 min-w-0 flex-col border-r p-5">
+            <input
+              ref={inputRef}
+              type="file"
+              accept={ACCEPT}
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleFile(f);
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files?.[0];
+                if (f) void handleFile(f);
+              }}
+              className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-border p-6 text-center transition-colors hover:border-ring hover:bg-muted/40"
+            >
               {status === "extracting" ? (
-                <>
-                  <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">
-                    Extracting transactions…
-                  </p>
-                </>
+                <Loader2Icon className="size-8 animate-spin text-muted-foreground" />
+              ) : fileName ? (
+                <FileTextIcon className="size-8 text-muted-foreground" />
               ) : (
-                <p className="max-w-xs text-sm text-muted-foreground">
-                  {error ??
-                    "Upload a document to automatically extract draft transactions for review."}
-                </p>
+                <UploadCloudIcon className="size-8 text-muted-foreground" />
               )}
-            </div>
-          )}
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium">
+                  {fileName ?? "Drop a file or click to upload"}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {status === "extracting"
+                    ? "Reading document…"
+                    : "PDF, image, CSV, or XLSX"}
+                </span>
+              </div>
+            </button>
+          </div>
+
+          {/* Right: transaction config / draft editor */}
+          <div className="flex min-w-0 flex-1 flex-col">
+            {drafts.length > 0 && current ? (
+              <>
+                <div className="flex items-center justify-between gap-2 border-b px-5 py-3">
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Previous transaction"
+                      disabled={index === 0}
+                      onClick={() => setIndex((i) => Math.max(0, i - 1))}
+                    >
+                      <ChevronLeftIcon />
+                    </Button>
+                    <span className="min-w-24 text-center text-sm font-medium tabular-nums">
+                      {index + 1} of {drafts.length}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Next transaction"
+                      disabled={index >= drafts.length - 1}
+                      onClick={() =>
+                        setIndex((i) => Math.min(drafts.length - 1, i + 1))
+                      }
+                    >
+                      <ChevronRightIcon />
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="sm" onClick={addBlankDraft}>
+                      <PlusIcon />
+                      Add
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Remove this transaction"
+                      onClick={removeDraft}
+                    >
+                      <Trash2Icon />
+                    </Button>
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+                  <TransactionForm
+                    value={current}
+                    onChange={updateDraft}
+                    categories={categories}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+                {status === "extracting" ? (
+                  <>
+                    <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">
+                      Extracting transactions…
+                    </p>
+                  </>
+                ) : (
+                  <p className="max-w-xs text-sm text-muted-foreground">
+                    {error ??
+                      "Upload a document to automatically extract draft transactions for review."}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

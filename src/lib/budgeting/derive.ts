@@ -1,41 +1,27 @@
 /**
- * Pure derivation helpers — every figure on the accounting page is computed from
+ * Pure derivation helpers — every figure on the budgeting page is computed from
  * the flat transaction ledger here. No server or DB imports, so these run on the
- * client too (the per-well page derives monthly rows and reports in the browser).
+ * client too.
  */
 import type {
+  CategorySummary,
   DraftTransaction,
   FinancialPoint,
-  MonthlyReport,
-  OwnerDistribution,
   Transaction,
-  WellFinancialSummary,
-} from "@/lib/accounting/types";
+} from "@/lib/budgeting/types";
 
 /** A blank expense draft dated `date` (ISO `YYYY-MM-DD`). */
 export function emptyDraft(date: string): DraftTransaction {
   return {
     kind: "expense",
-    counterparty: "",
+    payee: "",
     amount: 0,
     date,
     category: "",
     categoryCode: "",
-    invoiceNumber: "",
-    wellId: "",
-    volume: null,
-    price: null,
-    prodTax: null,
-    nri: null,
+    note: "",
+    account: "",
   };
-}
-
-/** The owner fields needed to compute a distribution. */
-export interface InterestOwner {
-  id: string;
-  name: string;
-  interestType: string;
-  decimalInterest: number;
 }
 
 /** Normalizes any ISO date to the first day of its month (`YYYY-MM-01`). */
@@ -43,92 +29,44 @@ export function monthKey(date: string): string {
   return `${date.slice(0, 7)}-01`;
 }
 
-/** Gross dollar value of a revenue row: volume × price, falling back to amount. */
-function grossOf(t: Transaction): number {
-  if (t.volume != null && t.price != null) return t.volume * t.price;
-  return t.amount;
-}
-
-/** Aggregates transactions into monthly net revenue / expenses / gross profit. */
+/** Aggregates transactions into monthly income / expenses / net cash flow. */
 export function aggregateMonthly(txns: Transaction[]): FinancialPoint[] {
   const byMonth = new Map<string, FinancialPoint>();
   for (const t of txns) {
     const key = monthKey(t.date);
     const point = byMonth.get(key) ?? {
       month: key,
-      netRevenue: 0,
+      income: 0,
       expenses: 0,
-      grossProfit: 0,
+      net: 0,
     };
-    if (t.kind === "revenue") point.netRevenue += t.amount;
+    if (t.kind === "income") point.income += t.amount;
     else point.expenses += t.amount;
     byMonth.set(key, point);
   }
   return [...byMonth.values()]
-    .map((p) => ({ ...p, grossProfit: p.netRevenue - p.expenses }))
+    .map((p) => ({ ...p, net: p.income - p.expenses }))
     .sort((a, b) => (a.month < b.month ? -1 : 1));
 }
 
-/** Totals transactions per well, sorted alphabetically by well name. */
-export function summarizeByWell(txns: Transaction[]): WellFinancialSummary[] {
-  const byWell = new Map<string, WellFinancialSummary>();
-  for (const t of txns) {
-    if (!t.wellId) continue;
-    const w = byWell.get(t.wellId) ?? {
-      wellId: t.wellId,
-      wellName: t.wellName || t.wellId,
-      netRevenue: 0,
-      expenses: 0,
-      grossProfit: 0,
-    };
-    if (t.kind === "revenue") w.netRevenue += t.amount;
-    else w.expenses += t.amount;
-    byWell.set(t.wellId, w);
-  }
-  return [...byWell.values()]
-    .map((w) => ({ ...w, grossProfit: w.netRevenue - w.expenses }))
-    .sort((a, b) => a.wellName.localeCompare(b.wellName));
-}
-
 /**
- * Builds the monthly report for one well + month from that well's transactions
- * and its interest owners. Distributions are each owner's decimal interest
- * applied to the month's gross revenue.
+ * Totals transactions per category (income and expense kept as separate rows),
+ * largest total first — the overview's "where the money goes" table.
  */
-export function buildMonthlyReport(
-  wellId: string,
-  wellName: string,
-  month: string,
-  wellTxns: Transaction[],
-  owners: InterestOwner[]
-): MonthlyReport {
-  const key = monthKey(month);
-  const inMonth = wellTxns.filter((t) => monthKey(t.date) === key);
-  const revenue = inMonth.filter((t) => t.kind === "revenue");
-  const expenses = inMonth.filter((t) => t.kind === "expense");
-
-  const revenueTotal = revenue.reduce((sum, t) => sum + t.amount, 0);
-  const expenseTotal = expenses.reduce((sum, t) => sum + t.amount, 0);
-  const grossRevenue = revenue.reduce((sum, t) => sum + grossOf(t), 0);
-
-  const distributions: OwnerDistribution[] = owners.map((o) => ({
-    id: o.id,
-    name: o.name,
-    interestType: o.interestType,
-    decimalInterest: o.decimalInterest,
-    amount: o.decimalInterest * grossRevenue,
-  }));
-
-  return {
-    wellId,
-    wellName,
-    month: key,
-    revenue,
-    expenses,
-    revenueTotal,
-    expenseTotal,
-    grossRevenue,
-    cashFlow: revenueTotal - expenseTotal,
-    distributions,
-  };
+export function summarizeByCategory(txns: Transaction[]): CategorySummary[] {
+  const byCategory = new Map<string, CategorySummary>();
+  for (const t of txns) {
+    const code = t.categoryCode || "UNCATEGORIZED";
+    const label = t.category || "Uncategorized";
+    const key = `${t.kind}:${code}`;
+    const row = byCategory.get(key) ?? {
+      categoryCode: code,
+      category: label,
+      kind: t.kind,
+      total: 0,
+    };
+    row.total += t.amount;
+    byCategory.set(key, row);
+  }
+  return [...byCategory.values()].sort((a, b) => b.total - a.total);
 }

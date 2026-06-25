@@ -12,7 +12,7 @@ import { recallMemories, rememberFact } from "@/lib/ai/memory";
 import { readConversation, searchChatHistory } from "@/lib/ai/chat-history";
 import { getTasks } from "@/lib/tasks/tasks";
 import { createTask } from "@/lib/tasks/actions";
-import { createProjectDocument } from "@/lib/files/actions";
+import { createProjectDocument, editProjectDocument } from "@/lib/files/actions";
 import { getDiagramSummary } from "@/lib/diagrams/read";
 import { createDiagramFromSpec, applyDiagramOps } from "@/lib/diagrams/actions";
 import { DiagramSpecSchema, DiagramOpsSchema } from "@/lib/diagrams/types";
@@ -46,7 +46,7 @@ const NOT_CONNECTED =
 /**
  * The tools Archon can call to read the company's live data + search documents +
  * remember user preferences. All are read-only except `remember`, `create_task`,
- * and (project-scoped) `create_document`.
+ * `edit_document`, and (project-scoped) `create_document`.
  *
  * The old operator-app data tools (wells, production, inventory, royalty owners,
  * people, accounting, pricing, calendar) were removed: they targeted a schema the
@@ -61,18 +61,33 @@ export function archonTools(folderId?: string) {
   return {
     list_tasks: tool({
       description:
-        "Tasks on the kanban board. Optionally filter by status (planned/priority/doing/done), assignee, or priority (Low/Medium/High).",
+        "Tasks on the kanban board, including their blocking dependencies and linked documents. Optionally filter by status (planned/priority/doing/done), assignee, or priority (Low/Medium/High). Each task includes `blockers` — the tasks that must be completed first, each with its title and status — `isBlocked` (true when any blocker isn't done yet), and `documents` (the knowledge-base files connected to the task, with their ids and names). Use blockers to reason about what can be worked next versus what is waiting, and use a task's documents (via read_file / search_documents) to ground answers about it in its supporting material.",
       inputSchema: z.object({
         status: z.string().optional(),
         assignee: z.string().optional(),
         priority: z.string().optional(),
       }),
       execute: async ({ status, assignee, priority }) => {
-        let tasks = await getTasks();
+        const all = await getTasks();
+        // Resolve blocker ids against the full set (before filtering) so a
+        // blocker's details show even when it's filtered out of the result.
+        const byId = new Map(all.map((t) => [t.id, t]));
+        let tasks = all;
         if (status) tasks = tasks.filter((t) => t.status === status);
         if (assignee) tasks = tasks.filter((t) => t.assignee === assignee);
         if (priority) tasks = tasks.filter((t) => t.priority === priority);
-        return { tasks };
+        const enriched = tasks.map((t) => {
+          const blockers = (t.blockedBy ?? [])
+            .map((id) => {
+              const b = byId.get(id);
+              return b
+                ? { id: b.id, title: b.title, status: b.status, done: b.status === "done" }
+                : null;
+            })
+            .filter((b): b is NonNullable<typeof b> => b !== null);
+          return { ...t, blockers, isBlocked: blockers.some((b) => !b.done) };
+        });
+        return { tasks: enriched };
       },
     }),
 
@@ -297,6 +312,26 @@ export function archonTools(folderId?: string) {
           }),
         }
       : {}),
+
+    edit_document: tool({
+      description:
+        "Edit an EXISTING document by its file id — overwrite its body with new content. Provide the FULL new body as Markdown: it REPLACES the current body, so include everything that should remain, not just the changed part. Call read_file first to get the current content, apply your changes, and pass back the complete result. Optionally pass `name` to rename the document. Works only on native text documents (notes/markdown the user or you wrote), not uploaded PDFs/images. The edit is re-indexed for search and its @-mention citations are reconciled, just like a manual edit in the editor. Use whenever the user asks to update, revise, rewrite, append to, fix, or otherwise change an existing document.",
+      inputSchema: z.object({
+        fileId: z
+          .string()
+          .describe("the document's file id (from search_documents / browse_files / read_file)"),
+        content: z
+          .string()
+          .describe("the FULL new document body, in Markdown (replaces the existing body)"),
+        name: z
+          .string()
+          .optional()
+          .describe("optional new title to rename the document"),
+      }),
+      needsApproval: true,
+      execute: async ({ fileId, content, name }) =>
+        editProjectDocument(fileId, content, name),
+    }),
 
     // Knowledge-graph writes. Per product policy, ONLY use these when the user
     // explicitly asks to tag a document or link/cite two documents — never add

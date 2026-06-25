@@ -4,14 +4,11 @@ import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
 import { SwipeUpModal } from "@/components/wells/swipe-up-modal";
 import { Button } from "@/components/ui/button";
-import {
-  TransactionForm,
-  type WellOption,
-} from "@/components/accounting/transaction-form";
-import { createTransactions } from "@/lib/accounting/actions";
-import { emptyDraft } from "@/lib/accounting/derive";
-import type { Category } from "@/lib/accounting/categories";
-import type { DraftTransaction } from "@/lib/accounting/types";
+import { TransactionForm } from "@/components/budgeting/transaction-form";
+import { createTransactions } from "@/lib/budgeting/actions";
+import { emptyDraft } from "@/lib/budgeting/derive";
+import type { Category } from "@/lib/budgeting/categories";
+import type { DraftTransaction } from "@/lib/budgeting/types";
 
 /** Today as an ISO `YYYY-MM-DD` in local time. */
 function today(): string {
@@ -21,7 +18,6 @@ function today(): string {
 interface ManualTransactionModalProps {
   open: boolean;
   onClose: () => void;
-  wells: WellOption[];
   categories: Category[];
 }
 
@@ -29,7 +25,6 @@ interface ManualTransactionModalProps {
 export function ManualTransactionModal({
   open,
   onClose,
-  wells,
   categories,
 }: ManualTransactionModalProps) {
   const [draft, setDraft] = useState<DraftTransaction>(() =>
@@ -38,7 +33,7 @@ export function ManualTransactionModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const valid = draft.amount > 0 && draft.date !== "" && draft.wellId !== "";
+  const valid = draft.amount > 0 && draft.date !== "";
 
   async function handleSave() {
     if (!valid || saving) return;
@@ -61,14 +56,13 @@ export function ManualTransactionModal({
       open={open}
       onClose={onClose}
       title="Add Transaction"
-      description="Manually record a revenue or expense entry."
+      description="Manually record an income or expense entry."
       className="max-w-xl"
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-5">
         <TransactionForm
           value={draft}
           onChange={(p) => setDraft({ ...draft, ...p })}
-          wells={wells}
           categories={categories}
         />
       </div>

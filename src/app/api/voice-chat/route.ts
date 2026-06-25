@@ -1,13 +1,16 @@
 import { anthropic } from "@ai-sdk/anthropic";
+import { after } from "next/server";
 import {
   convertToModelMessages,
   stepCountIs,
   streamText,
   type UIMessage,
 } from "ai";
-import { buildSystemPrompt } from "@/lib/ai/system-prompt";
+import { assembleSystemPrompt } from "@/lib/ai/system-prompt";
 import { buildManifestCached } from "@/lib/ai/manifest";
 import { archonTools } from "@/lib/ai/tools";
+import { loadContextDocs } from "@/lib/ai/context/docs";
+import { latestUserText, reflectOnTurn } from "@/lib/ai/reflection";
 import { getProfile } from "@/lib/settings/profile";
 import { forbidUnlessPermitted } from "@/lib/auth/permissions";
 import { getSupabaseServer } from "@/lib/supabase/server";
@@ -50,24 +53,26 @@ export async function POST(req: Request) {
 
   const { messages, pageContext }: VoiceChatRequest = await req.json();
 
-  const [manifest, profile] = await Promise.all([
+  const [docs, manifest, profile] = await Promise.all([
+    loadContextDocs(),
     buildManifestCached(),
     getProfile(),
   ]);
-  let system =
-    buildSystemPrompt(manifest, {
-      name: profile.name,
-      company: profile.companyName,
+  const system =
+    assembleSystemPrompt({
+      docs,
+      manifest,
+      user: { name: profile.name, company: profile.companyName },
+      pageContext,
     }) + VOICE_STYLE;
-  if (pageContext) {
-    system += `\n\n---\n\n## Where the user is\n\n${pageContext}`;
-  }
 
   // Full tool access, including write tools. Each write tool is marked
   // `needsApproval`, so the SDK pauses the run and streams an approval-request
   // part instead of executing; the voice client surfaces a tap-to-approve card
   // (just like the typed drawer) and replays the approved message to resume.
   const tools = archonTools();
+
+  const userText = latestUserText(messages);
 
   const result = streamText({
     // Opus for voice too: spoken answers are optimized for information density,
@@ -78,7 +83,7 @@ export async function POST(req: Request) {
     messages: await convertToModelMessages(messages),
     tools,
     stopWhen: stepCountIs(8),
-    onFinish: ({ totalUsage, steps }) => {
+    onFinish: ({ totalUsage, steps, text }) => {
       void meterAnthropic(
         {
           inputTokens: totalUsage.inputTokens,
@@ -92,6 +97,8 @@ export async function POST(req: Request) {
         "voice-chat:web_search",
         sb,
       );
+      // Self-improvement loop, in the background after the spoken turn finishes.
+      after(() => reflectOnTurn({ userText, assistantText: text }));
     },
   });
 

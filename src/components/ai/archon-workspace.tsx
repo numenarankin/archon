@@ -85,9 +85,13 @@ export function ArchonWorkspace({
     (messages: UIMessage[]) => {
       if (!activeId) return;
       const id = activeId;
-      setConversations((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, messages } : c))
-      );
+      setConversations((prev) => {
+        // Skip identical re-propagation so a no-op update can't allocate a new
+        // conversation object and re-render the chat for nothing.
+        const current = prev.find((c) => c.id === id);
+        if (current && current.messages === messages) return prev;
+        return prev.map((c) => (c.id === id ? { ...c, messages } : c));
+      });
       // Don't persist an empty conversation; only save once there's content.
       if (messages.length === 0) return;
       if (saveTimer.current) clearTimeout(saveTimer.current);

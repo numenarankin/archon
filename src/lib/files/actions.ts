@@ -43,18 +43,23 @@ export async function uploadFiles(
   formData: FormData
 ): Promise<void> {
   const sb = await getSupabaseServer();
+  // The workspace that will own these files; used to namespace the storage key
+  // (`<workspace_id>/<id>`) so the bucket's prefix-scoped RLS lines up with the
+  // workspace_id the DB row defaults to.
+  const { data: workspaceId } = await sb.rpc("app_default_workspace_id");
   const files = formData.getAll("files").filter((f): f is File => f instanceof File);
 
   for (const file of files) {
     const id = randomId();
+    const storageKey = workspaceId ? `${workspaceId}/${id}` : id;
     const bytes = await file.arrayBuffer();
 
     // Bytes go to the private bucket via the admin client; the DB rows below go
-    // through the request-scoped client so RLS assigns org_id and enforces
-    // manage_files.
+    // through the request-scoped client so RLS assigns workspace_id and enforces
+    // access.
     const { error: upErr } = await getSupabaseAdmin()
       .storage.from(BUCKET)
-      .upload(id, bytes, { contentType: file.type || undefined, upsert: false });
+      .upload(storageKey, bytes, { contentType: file.type || undefined, upsert: false });
     if (upErr) throw new Error(`uploadFiles (storage): ${upErr.message}`);
 
     // Extract text inline for text-like docs (incl. structured LAS/CSV/TSV) so
@@ -69,7 +74,7 @@ export async function uploadFiles(
       type: fileType(file.name),
       mime: file.type || null,
       size: file.size,
-      storage_key: id,
+      storage_key: storageKey,
       content,
     });
     if (fileErr) throw new Error(`uploadFiles (files): ${fileErr.message}`);
@@ -212,6 +217,58 @@ export async function saveDoc(fileId: string, content: string): Promise<void> {
   } catch (error) {
     console.error("embedFile (saveDoc) failed", error);
   }
+}
+
+/**
+ * Edit an existing document's body (and optionally rename it). Archon supplies
+ * Markdown — the same format as create — which we convert to the editor's HTML
+ * and persist through `saveDoc`, so the body, its @-mention citations
+ * (bridges), and the search index all stay in sync, exactly as a human edit in
+ * the editor would. Only native text documents (inline `content`, no stored
+ * binary) can be edited this way; uploaded PDFs/images are rejected.
+ */
+export async function editProjectDocument(
+  fileId: string,
+  markdown: string,
+  name?: string
+): Promise<
+  { ok: true; id: string; name: string } | { ok: false; error: string }
+> {
+  const sb = await getSupabaseServer();
+  const { data: file } = await sb
+    .from("files")
+    .select("id, name, type, storage_key")
+    .eq("id", fileId)
+    .maybeSingle();
+  if (!file) return { ok: false, error: "No document with that id." };
+  if (file.storage_key) {
+    return {
+      ok: false,
+      error:
+        "That file is an uploaded/binary file (PDF, image, etc.), not an editable text document.",
+    };
+  }
+
+  // Optional rename, mirroring createProjectDocument's `.md` default.
+  let finalName = file.name as string;
+  const trimmed = name?.trim();
+  if (trimmed) {
+    finalName = /\.[a-z0-9]+$/i.test(trimmed) ? trimmed : `${trimmed}.md`;
+    const { error: nameErr } = await sb
+      .from("files")
+      .update({ name: finalName })
+      .eq("id", fileId);
+    if (nameErr) {
+      throw new Error(`editProjectDocument (rename): ${nameErr.message}`);
+    }
+  }
+
+  // Body + bridges + reindex go through the canonical save path.
+  const html = (await marked.parse(markdown ?? "")).toString();
+  await saveDoc(fileId, html);
+
+  revalidatePath("/files");
+  return { ok: true, id: fileId, name: finalName };
 }
 
 /** Rename a folder (e.g. a project). */

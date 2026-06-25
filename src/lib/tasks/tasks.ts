@@ -25,6 +25,33 @@ export interface Task {
   budget?: number;
   /** Amount spent so far in USD. */
   spend?: number;
+  /**
+   * Manual position within its column. Lower sorts higher; newly created tasks
+   * get a large value so they land at the bottom. Reordering renormalizes a
+   * column to 0, 1, 2, … See `reorderTasks` in `actions.ts`.
+   */
+  sortOrder?: number;
+  /**
+   * Ids of tasks that must be completed before this one can proceed (its
+   * blockers). Surfaced on the board (blocked cards) and to Archon via
+   * `list_tasks`, so completion order can be reasoned about. Empty when the task
+   * has no dependencies.
+   */
+  blockedBy?: string[];
+  /**
+   * Knowledge-base documents connected to this task (the files it relates to).
+   * Edited from the task modal, shown on the card, and read by Archon. Empty
+   * when nothing is linked.
+   */
+  documents?: TaskDocument[];
+}
+
+/** A document linked to a task, with just enough to display + reference it. */
+export interface TaskDocument {
+  id: string;
+  name: string;
+  /** KB file type (e.g. "doc", "diagram"), when known. */
+  type?: string;
 }
 
 export interface TaskColumn {
@@ -74,6 +101,8 @@ interface TaskRow {
   folder_id: string | null;
   budget: number | null;
   spend: number | null;
+  sort_order: number | null;
+  blocked_by: string[] | null;
 }
 
 function mapTask(r: TaskRow): Task {
@@ -89,24 +118,80 @@ function mapTask(r: TaskRow): Task {
     folderId: r.folder_id ?? undefined,
     budget: r.budget ?? undefined,
     spend: r.spend ?? undefined,
+    sortOrder: r.sort_order ?? undefined,
+    blockedBy: r.blocked_by ?? [],
   };
 }
 
 const TASK_COLS =
-  "id, title, description, status, priority, assignee, deadline, deadline_time, folder_id, budget, spend";
+  "id, title, description, status, priority, assignee, deadline, deadline_time, folder_id, budget, spend, sort_order, blocked_by";
 
 /**
- * Returns tasks newest first. Pass a `folderId` to scope to one project's tasks
- * (the project Tasks/Budget tabs); omit it for the global board (all tasks).
+ * Returns tasks in board order: within each column, by manual `sort_order`
+ * ascending, then oldest-first as a tiebreaker — so newly added tasks (which
+ * get a large `sort_order`) land at the bottom of their column. Pass a
+ * `folderId` to scope to one project's tasks (the project Tasks/Budget tabs);
+ * omit it for the global board (all tasks).
  */
 export async function getTasks(folderId?: string): Promise<Task[]> {
   if (!hasSupabase()) return [];
   const sb = await getSupabaseServer();
   let query = sb.from("tasks").select(TASK_COLS);
   if (folderId) query = query.eq("folder_id", folderId);
-  const { data, error } = await query.order("created_at", { ascending: false });
+  const { data, error } = await query
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
   if (error) throw new Error(`getTasks: ${error.message}`);
-  return ((data ?? []) as TaskRow[]).map(mapTask);
+  const rows = (data ?? []) as TaskRow[];
+  const documentsByTask = await loadTaskDocuments(
+    sb,
+    rows.map((r) => r.id)
+  );
+  return rows.map((r) => ({
+    ...mapTask(r),
+    documents: documentsByTask.get(r.id) ?? [],
+  }));
+}
+
+/**
+ * Linked documents for a set of tasks, keyed by task id. Resolves the
+ * `task_files` links to file names/types in one pass. Returns an empty map (so
+ * tasks still load) if the link table isn't there yet or the lookup fails —
+ * document links are decoration, never a reason to break the board.
+ */
+async function loadTaskDocuments(
+  sb: Awaited<ReturnType<typeof getSupabaseServer>>,
+  taskIds: string[]
+): Promise<Map<string, TaskDocument[]>> {
+  const byTask = new Map<string, TaskDocument[]>();
+  if (taskIds.length === 0) return byTask;
+
+  const { data: links, error } = await sb
+    .from("task_files")
+    .select("task_id, file_id")
+    .in("task_id", taskIds);
+  if (error || !links || links.length === 0) return byTask;
+
+  const linkRows = links as { task_id: string; file_id: string }[];
+  const fileIds = [...new Set(linkRows.map((l) => l.file_id))];
+  const { data: files } = await sb
+    .from("files")
+    .select("id, name, type")
+    .in("id", fileIds);
+  const fileById = new Map(
+    ((files ?? []) as { id: string; name: string; type: string | null }[]).map(
+      (f) => [f.id, f]
+    )
+  );
+
+  for (const link of linkRows) {
+    const file = fileById.get(link.file_id);
+    if (!file) continue;
+    const list = byTask.get(link.task_id) ?? [];
+    list.push({ id: file.id, name: file.name, type: file.type ?? undefined });
+    byTask.set(link.task_id, list);
+  }
+  return byTask;
 }
 
 /**

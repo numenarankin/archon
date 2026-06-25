@@ -10,55 +10,43 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { FinancialChart } from "@/components/accounting/financial-chart";
-import { WellFinancialsTable } from "@/components/accounting/well-financials-table";
-import { ReportsPanel } from "@/components/accounting/reports-panel";
-import { LedgerPanel } from "@/components/accounting/ledger-panel";
-import { UploadsPanel } from "@/components/accounting/uploads-panel";
-import { ManualTransactionModal } from "@/components/accounting/manual-transaction-modal";
-import { UploadTransactionsModal } from "@/components/accounting/upload-transactions-modal";
-import type { WellOption } from "@/components/accounting/transaction-form";
-import {
-  aggregateMonthly,
-  summarizeByWell,
-  type InterestOwner,
-} from "@/lib/accounting/derive";
-import type { Category } from "@/lib/accounting/categories";
-import type { Transaction } from "@/lib/accounting/types";
-import type { AccountingUpload } from "@/lib/accounting/uploads";
+import { FinancialChart } from "@/components/budgeting/financial-chart";
+import { CategoryTable } from "@/components/budgeting/category-table";
+import { LedgerPanel } from "@/components/budgeting/ledger-panel";
+import { UploadsPanel } from "@/components/budgeting/uploads-panel";
+import { ManualTransactionModal } from "@/components/budgeting/manual-transaction-modal";
+import { UploadTransactionsModal } from "@/components/budgeting/upload-transactions-modal";
+import { aggregateMonthly, summarizeByCategory } from "@/lib/budgeting/derive";
+import type { Category } from "@/lib/budgeting/categories";
+import type { Transaction } from "@/lib/budgeting/types";
+import type { BudgetUpload } from "@/lib/budgeting/uploads";
 
-type Tab = "overview" | "reports" | "ledger" | "uploads";
+type Tab = "overview" | "ledger" | "uploads";
 
-interface AccountingWorkspaceProps {
+interface BudgetingWorkspaceProps {
   transactions: Transaction[];
-  wells: WellOption[];
-  /** Interest owners keyed by well id, for monthly report distributions. */
-  ownersByWell: Record<string, InterestOwner[]>;
-  /** The org's chart of accounts, for the Add Transaction forms. */
+  /** The budget category list, for the Add Transaction forms. */
   categories: Category[];
   /** Upload batches, for the Uploads tab. */
-  uploads: AccountingUpload[];
+  uploads: BudgetUpload[];
 }
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "overview", label: "Overview" },
-  { key: "reports", label: "Reports" },
   { key: "ledger", label: "Ledger" },
   { key: "uploads", label: "Uploads" },
 ];
 
 /**
- * The /accounting page: an Overview tab (aggregate chart + sortable per-well
- * table) and a Reports tab (browsable, filterable statements). An Add
- * Transaction action sits on the right of the header menu.
+ * The /budgeting page: an Overview tab (monthly cash-flow chart + category
+ * breakdown), a Ledger tab (every transaction, editable inline), and an Uploads
+ * tab. An Add Transaction action sits on the right of the header.
  */
-export function AccountingWorkspace({
+export function BudgetingWorkspace({
   transactions,
-  wells,
-  ownersByWell,
   categories,
   uploads,
-}: AccountingWorkspaceProps) {
+}: BudgetingWorkspaceProps) {
   const [tab, setTab] = useState<Tab>("overview");
   const [modal, setModal] = useState<"manual" | "upload" | null>(null);
 
@@ -66,14 +54,13 @@ export function AccountingWorkspace({
     () => aggregateMonthly(transactions),
     [transactions]
   );
-  const wellSummaries = useMemo(
-    () => summarizeByWell(transactions),
+  const categorySummaries = useMemo(
+    () => summarizeByCategory(transactions),
     [transactions]
   );
 
   return (
     <div className="flex flex-1 flex-col gap-6">
-      {/* Header menu (Pricing-style tabs) + Add Transaction. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
           {TABS.map((t) => (
@@ -119,35 +106,22 @@ export function AccountingWorkspace({
       {tab === "overview" && (
         <>
           <FinancialChart data={series} />
-          <WellFinancialsTable wells={wellSummaries} />
+          <CategoryTable categories={categorySummaries} />
         </>
       )}
-      {tab === "reports" && (
-        <ReportsPanel
-          transactions={transactions}
-          wells={wells}
-          ownersByWell={ownersByWell}
-        />
-      )}
       {tab === "ledger" && (
-        <LedgerPanel
-          transactions={transactions}
-          wells={wells}
-          categories={categories}
-        />
+        <LedgerPanel transactions={transactions} categories={categories} />
       )}
       {tab === "uploads" && <UploadsPanel uploads={uploads} />}
 
       <ManualTransactionModal
         open={modal === "manual"}
         onClose={() => setModal(null)}
-        wells={wells}
         categories={categories}
       />
       <UploadTransactionsModal
         open={modal === "upload"}
         onClose={() => setModal(null)}
-        wells={wells}
         categories={categories}
       />
     </div>

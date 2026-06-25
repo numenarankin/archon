@@ -39,6 +39,9 @@ export interface Message {
   snippet: string;
   /** Full message body, plain text. Paragraphs separated by blank lines. */
   body: string;
+  /** Original HTML body when the message has one; rendered in a sandboxed
+   * iframe. `body` holds a plain-text version for previews/search. */
+  bodyHtml?: string;
   /** ISO timestamp the message was sent/received. */
   date: string;
   read: boolean;

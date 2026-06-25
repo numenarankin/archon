@@ -1,10 +1,9 @@
 import { z } from "zod";
-import type { TransactionKind } from "@/lib/accounting/types";
+import type { TransactionKind } from "@/lib/budgeting/types";
 
 /**
- * A ledger category and its accounting code. The active set is per-organization
- * (configured in Settings → Accounting); `DEFAULT_CATEGORIES` below is the
- * sample fallback used until an org saves its own chart of accounts.
+ * A budget category and its code. Personal budgeting ships a built-in set
+ * (`DEFAULT_CATEGORIES`); there's no per-org chart of accounts to configure.
  */
 export interface Category {
   code: string;
@@ -12,38 +11,43 @@ export interface Category {
   kind: TransactionKind;
 }
 
-/** Schema for the org-supplied chart of accounts (the Settings JSON). */
+/** Schema for a category list (used to validate model-extracted codes). */
 export const categoriesSchema = z
   .array(
     z.object({
       code: z.string().trim().min(1, "code is required"),
       label: z.string().trim().min(1, "label is required"),
-      kind: z.enum(["revenue", "expense"]),
+      kind: z.enum(["income", "expense"]),
     })
   )
   .min(1, "Add at least one category");
 
-/** Built-in sample chart of accounts for an oil & gas operator. */
+/** Built-in personal-budget categories. */
 export const DEFAULT_CATEGORIES: Category[] = [
-  // Revenue
-  { code: "REV-OIL", label: "Oil Sales", kind: "revenue" },
-  { code: "REV-GAS", label: "Gas Sales", kind: "revenue" },
-  { code: "REV-NGL", label: "NGL Sales", kind: "revenue" },
-  { code: "REV-SWD", label: "Saltwater Disposal Income", kind: "revenue" },
-  { code: "REV-OTH", label: "Other Income", kind: "revenue" },
+  // Income
+  { code: "INC-SAL", label: "Salary & Wages", kind: "income" },
+  { code: "INC-BON", label: "Bonus", kind: "income" },
+  { code: "INC-INT", label: "Interest & Dividends", kind: "income" },
+  { code: "INC-GIF", label: "Gifts Received", kind: "income" },
+  { code: "INC-REF", label: "Refunds & Reimbursements", kind: "income" },
+  { code: "INC-OTH", label: "Other Income", kind: "income" },
   // Expense
-  { code: "EXP-LOE", label: "Lease Operating Expense", kind: "expense" },
-  { code: "EXP-WRK", label: "Workover & Repairs", kind: "expense" },
-  { code: "EXP-SEV", label: "Severance / Production Tax", kind: "expense" },
-  { code: "EXP-CMP", label: "Compression", kind: "expense" },
-  { code: "EXP-CHM", label: "Chemicals", kind: "expense" },
-  { code: "EXP-PWR", label: "Electricity & Fuel", kind: "expense" },
-  { code: "EXP-WTR", label: "Water Disposal", kind: "expense" },
-  { code: "EXP-EQP", label: "Equipment Rental", kind: "expense" },
-  { code: "EXP-LBR", label: "Pumping & Labor", kind: "expense" },
-  { code: "EXP-TRN", label: "Trucking & Transportation", kind: "expense" },
-  { code: "EXP-INS", label: "Insurance", kind: "expense" },
-  { code: "EXP-ADM", label: "Administrative", kind: "expense" },
+  { code: "EXP-HOUS", label: "Housing & Rent", kind: "expense" },
+  { code: "EXP-UTIL", label: "Utilities", kind: "expense" },
+  { code: "EXP-GROC", label: "Groceries", kind: "expense" },
+  { code: "EXP-DINE", label: "Dining & Takeout", kind: "expense" },
+  { code: "EXP-TRAN", label: "Transportation", kind: "expense" },
+  { code: "EXP-HEAL", label: "Health & Medical", kind: "expense" },
+  { code: "EXP-INSU", label: "Insurance", kind: "expense" },
+  { code: "EXP-SUBS", label: "Subscriptions", kind: "expense" },
+  { code: "EXP-ENT", label: "Entertainment", kind: "expense" },
+  { code: "EXP-SHOP", label: "Shopping", kind: "expense" },
+  { code: "EXP-TRAV", label: "Travel", kind: "expense" },
+  { code: "EXP-EDU", label: "Education", kind: "expense" },
+  { code: "EXP-DEBT", label: "Debt & Loan Payments", kind: "expense" },
+  { code: "EXP-SAVE", label: "Savings & Investments", kind: "expense" },
+  { code: "EXP-GIFT", label: "Gifts & Donations", kind: "expense" },
+  { code: "EXP-OTH", label: "Other Expense", kind: "expense" },
 ];
 
 /** Categories of a given kind, from a supplied list. */
@@ -54,45 +58,7 @@ export function categoriesFor(
   return categories.filter((c) => c.kind === kind);
 }
 
-/** Parses + validates the Settings JSON text into a category list. */
-export function parseCategories(
-  text: string
-): { ok: true; categories: Category[] } | { ok: false; error: string } {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return { ok: false, error: "Not valid JSON." };
-  }
-  const result = categoriesSchema.safeParse(raw);
-  if (!result.success) {
-    const first = result.error.issues[0];
-    const path = first?.path.join(".");
-    return {
-      ok: false,
-      error: path ? `${path}: ${first.message}` : (first?.message ?? "Invalid format."),
-    };
-  }
-  return { ok: true, categories: result.data };
+/** The active category list. Personal budgeting uses the built-in set. */
+export function getBudgetCategories(): Category[] {
+  return DEFAULT_CATEGORIES;
 }
-
-/**
- * The prompt a user copies to have an LLM convert their raw account list into
- * the exact JSON this app expects. Kept here so the button and any docs stay in
- * sync with the schema above.
- */
-export const CATEGORIES_PROMPT = `Convert my chart of accounts into JSON for my accounting app.
-
-Output ONLY a JSON array — no commentary, no code fences. Each item must be an object with exactly these keys:
-- "code": string — the account code (e.g. "EXP-LBR")
-- "label": string — the human-readable account name (e.g. "Pumping & Labor")
-- "kind": "revenue" or "expense" — whether the account records money coming in (revenue) or going out (expense)
-
-Example:
-[
-  { "code": "REV-GAS", "label": "Gas Sales", "kind": "revenue" },
-  { "code": "EXP-LBR", "label": "Pumping & Labor", "kind": "expense" }
-]
-
-Here is my list of accounts (paste yours below):
-`;

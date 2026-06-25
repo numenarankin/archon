@@ -12,8 +12,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { deleteUpload } from "@/lib/accounting/actions";
-import type { AccountingUpload } from "@/lib/accounting/uploads";
+import { deleteUpload } from "@/lib/budgeting/actions";
+import type { BudgetUpload } from "@/lib/budgeting/uploads";
 
 const currency = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -33,19 +33,19 @@ function formatDate(iso: string): string {
 }
 
 interface UploadsPanelProps {
-  uploads: AccountingUpload[];
+  uploads: BudgetUpload[];
 }
 
 /**
- * Lists every file uploaded into the ledger as a batch. Removing one deletes the
- * stored file and — via the cascading `upload_id` FK — every transaction created
- * from it. This is the one-step undo for a bad import.
+ * Lists every file imported as a batch. Removing one deletes the stored file
+ * and — via the cascading `upload_id` FK — every transaction created from it.
  */
 export function UploadsPanel({ uploads }: UploadsPanelProps) {
   if (uploads.length === 0) {
     return (
       <div className="rounded-lg border border-border p-10 text-center text-sm text-muted-foreground">
-        No uploads yet. Use Add Transaction → Upload file to import a statement.
+        No uploads yet. Use Add Transaction → Upload file to import a statement
+        or receipt.
       </div>
     );
   }
@@ -72,7 +72,7 @@ export function UploadsPanel({ uploads }: UploadsPanelProps) {
   );
 }
 
-function UploadRow({ upload }: { upload: AccountingUpload }) {
+function UploadRow({ upload }: { upload: BudgetUpload }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [confirming, setConfirming] = useState(false);
@@ -96,14 +96,18 @@ function UploadRow({ upload }: { upload: AccountingUpload }) {
       <TableCell>
         <div className="flex items-center gap-2">
           <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
-          <span className="max-w-64 truncate">{upload.fileName || "Upload"}</span>
+          <span className="max-w-64 truncate">
+            {upload.fileName || "Upload"}
+          </span>
         </div>
         {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
       </TableCell>
       <TableCell className="text-muted-foreground">
         {formatDate(upload.createdAt)}
       </TableCell>
-      <TableCell className="text-right tabular-nums">{upload.txnCount}</TableCell>
+      <TableCell className="text-right tabular-nums">
+        {upload.txnCount}
+      </TableCell>
       <TableCell className="text-right font-mono tabular-nums">
         {currency.format(upload.totalAmount)}
       </TableCell>

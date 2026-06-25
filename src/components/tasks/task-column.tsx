@@ -9,14 +9,29 @@ import type { Task, TaskColumn as TaskColumnDef } from "@/lib/tasks/tasks";
 interface TaskColumnProps {
   column: TaskColumnDef;
   tasks: Task[];
-  onDropTask: (taskId: string, status: TaskColumnDef["status"]) => void;
+  /** Ids of not-yet-done tasks, used to flag cards with open blockers. */
+  openTaskIds: Set<string>;
+  /** Drop onto the column body (not over a card): send the card to the end. */
+  onDropToEnd: (taskId: string, status: TaskColumnDef["status"]) => void;
+  /** Reposition the dragged card relative to a card in this column. */
+  onReorder: (
+    dragId: string,
+    targetId: string,
+    placeAfter: boolean,
+    status: TaskColumnDef["status"]
+  ) => void;
+  /** Save the board order once a drag ends. */
+  onPersist: () => void;
   onOpenTask: (task: Task) => void;
 }
 
 export function TaskColumn({
   column,
   tasks,
-  onDropTask,
+  openTaskIds,
+  onDropToEnd,
+  onReorder,
+  onPersist,
   onOpenTask,
 }: TaskColumnProps) {
   const [{ isOver }, dropRef] = useDrop<
@@ -25,9 +40,14 @@ export function TaskColumn({
     { isOver: boolean }
   >(() => ({
     accept: TASK_DND_TYPE,
-    drop: (item) => onDropTask(item.id, column.status),
-    collect: (monitor) => ({ isOver: monitor.isOver() }),
-  }), [column.status, onDropTask]);
+    // A card's drop handler runs first; if it handled the drop (precise
+    // position), don't also send the card to the end of the column.
+    drop: (item, monitor) => {
+      if (monitor.didDrop()) return;
+      onDropToEnd(item.id, column.status);
+    },
+    collect: (monitor) => ({ isOver: monitor.isOver({ shallow: true }) }),
+  }), [column.status, onDropToEnd]);
 
   return (
     <div className="flex min-h-0 w-72 shrink-0 flex-col rounded-xl bg-muted/40">
@@ -47,7 +67,16 @@ export function TaskColumn({
         )}
       >
         {tasks.map((task) => (
-          <TaskCard key={task.id} task={task} onOpen={onOpenTask} />
+          <TaskCard
+            key={task.id}
+            task={task}
+            openBlockerCount={
+              (task.blockedBy ?? []).filter((id) => openTaskIds.has(id)).length
+            }
+            onOpen={onOpenTask}
+            onReorder={onReorder}
+            onPersist={onPersist}
+          />
         ))}
         {tasks.length === 0 && (
           <p className="px-1 py-2 text-xs text-muted-foreground/70">

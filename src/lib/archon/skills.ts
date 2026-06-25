@@ -23,8 +23,10 @@ export interface ArchonSkill {
   category: SkillCategory;
   /** Lucide icon key resolved by the UI (see SKILL_ICONS). */
   icon: string;
-  /** Underlying tool names this skill is backed by. */
+  /** Underlying tool names this skill is backed by (its tool allowlist). */
   tools: string[];
+  /** Full markdown body (custom skills only): how and when to use the skill. */
+  content?: string;
   /** Example prompts that exercise the skill. */
   examples: string[];
   /** Enabled out of the box. */
@@ -77,13 +79,14 @@ export const ARCHON_SKILLS: ArchonSkill[] = [
     id: "document-authoring",
     name: "Document Authoring",
     description:
-      "Inside a project, draft and save a new Markdown document (a summary, memo, or write-up) into the project's files, indexed for search.",
+      "Draft and save new Markdown documents (a summary, memo, or write-up) into a project's files, and edit existing documents — both indexed for search. Edits always ask for your approval first.",
     category: "Documents",
     icon: "pencil",
-    tools: ["create_document"],
+    tools: ["create_document", "edit_document"],
     examples: [
       "Draft a one-page summary of this project and save it.",
       "Write up a memo from the notes in this folder.",
+      "Update the prospect summary to add a risks section.",
     ],
     enabledByDefault: true,
     requiresApproval: true,
@@ -110,7 +113,7 @@ export const ARCHON_SKILLS: ArchonSkill[] = [
     id: "tasks-scheduling",
     name: "Task Board",
     description:
-      "Review the kanban board and open new tasks, with status, priority, assignee, and deadlines.",
+      "Review the kanban board and open new tasks, with status, priority, assignee, deadlines, and blocking dependencies (what's waiting on what).",
     category: "Productivity",
     icon: "list-todo",
     tools: ["list_tasks", "create_task"],

@@ -5,6 +5,8 @@ import dynamic from "next/dynamic";
 import { ArrowLeftIcon, Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getDownloadUrl } from "@/lib/files/actions";
+import { isCsv } from "@/lib/kb/parsers/csv";
+import { CsvViewer } from "@/components/files/csv-viewer";
 import type { RepoFile } from "@/lib/kb/types";
 
 // react-pdf (inside FilePreview) touches browser-only globals (DOMMatrix) at
@@ -40,12 +42,14 @@ export function DocumentViewer({
   onBack: () => void;
 }) {
   const previewable = isPreviewable(file.type, name);
+  const csv = isCsv(name);
+  const needsUrl = previewable || csv;
   const [url, setUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(previewable);
+  const [loading, setLoading] = useState(needsUrl);
 
-  // Fetch the signed URL for PDFs / images.
+  // Fetch the signed URL for PDFs / images / CSVs.
   useEffect(() => {
-    if (!previewable) return;
+    if (!needsUrl) return;
     let active = true;
     getDownloadUrl(file.id)
       .then((signed) => {
@@ -60,7 +64,7 @@ export function DocumentViewer({
     return () => {
       active = false;
     };
-  }, [file.id, previewable]);
+  }, [file.id, needsUrl]);
 
   const placeholder = useMemo(
     () =>
@@ -82,12 +86,15 @@ export function DocumentViewer({
   const [src, setSrc] = useState<string>("");
 
   useEffect(() => {
-    if (previewable) return;
+    if (needsUrl) return;
     const blob = new Blob([placeholder], { type: "text/html" });
     const objectUrl = URL.createObjectURL(blob);
+    // Object-URL lifecycle (create now, revoke on cleanup) legitimately needs an
+    // effect; the synchronous set is intentional here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSrc(objectUrl);
     return () => URL.revokeObjectURL(objectUrl);
-  }, [placeholder, previewable]);
+  }, [placeholder, needsUrl]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -101,19 +108,21 @@ export function DocumentViewer({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-white">
-        {previewable ? (
+        {needsUrl ? (
           loading ? (
             <div className="flex flex-1 items-center justify-center text-tertiary-text">
               <Loader2Icon className="size-5 animate-spin" />
             </div>
-          ) : url ? (
-            <FilePreview url={url} type={file.type} name={name} />
-          ) : (
+          ) : !url ? (
             <div className="flex flex-1 items-center justify-center text-sm text-tertiary-text">
               No preview available for this file.
             </div>
+          ) : csv ? (
+            <CsvViewer url={url} name={name} />
+          ) : (
+            <FilePreview url={url} type={file.type} name={name} />
           )
-        ) : (
+        ) : src ? (
           <iframe
             src={src}
             title={name}
@@ -121,6 +130,10 @@ export function DocumentViewer({
             // Sandbox the embedded document; allow same-origin so blob URLs render.
             sandbox="allow-same-origin"
           />
+        ) : (
+          <div className="flex flex-1 items-center justify-center text-tertiary-text">
+            <Loader2Icon className="size-5 animate-spin" />
+          </div>
         )}
       </div>
     </div>

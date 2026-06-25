@@ -1,11 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ChevronDownIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ChevronDownIcon,
+  FileTextIcon,
+  LinkIcon,
+  PlusIcon,
+  XIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { findMentionCandidates } from "@/lib/files/graph-actions";
+import type { MentionCandidate } from "@/lib/kb/types";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -19,6 +28,7 @@ import {
   UNASSIGNED,
   descriptionPreview,
   type Task,
+  type TaskDocument,
   type TaskPriority,
   type TaskStatus,
 } from "@/lib/tasks/tasks";
@@ -82,6 +92,182 @@ function MetaDropdown({
   );
 }
 
+/** A pickable blocker in the "Blocked by" menu. */
+interface BlockerOption {
+  id: string;
+  title: string;
+}
+
+/** Multi-select of the tasks that block this one, on the shadcn dropdown. */
+function BlockedByDropdown({
+  options,
+  selected,
+  onToggle,
+}: {
+  options: BlockerOption[];
+  selected: string[];
+  onToggle: (id: string, next: boolean) => void;
+}) {
+  const label =
+    selected.length === 0
+      ? "Not blocked"
+      : `${selected.length} task${selected.length === 1 ? "" : "s"}`;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Blocked by"
+            className="flex h-11 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 text-sm outline-none transition-colors hover:bg-accent/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+          />
+        }
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="max-h-72 w-64 overflow-y-auto">
+        {options.length === 0 ? (
+          <div className="px-2 py-1.5 text-sm text-muted-foreground">
+            No other tasks to depend on
+          </div>
+        ) : (
+          options.map((option) => (
+            <DropdownMenuCheckboxItem
+              key={option.id}
+              checked={selected.includes(option.id)}
+              onCheckedChange={(v) => onToggle(option.id, v === true)}
+              onSelect={(e) => e.preventDefault()}
+            >
+              <span className="truncate">{option.title}</span>
+            </DropdownMenuCheckboxItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * "Connect document" control for the task modal: links the task to knowledge-
+ * base files. Searches files via the same mention-candidate action the editor
+ * and diagram citations use; selections are held in the modal's form state and
+ * persisted (to task_files) when the task is saved.
+ */
+function TaskDocumentsField({
+  selected,
+  folderId,
+  onAdd,
+  onRemove,
+}: {
+  selected: TaskDocument[];
+  folderId?: string;
+  onAdd: (doc: TaskDocument) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<MentionCandidate[]>([]);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Initial list when the picker opens, then debounced search as the user types.
+  useEffect(() => {
+    if (!open) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(
+      () => {
+        findMentionCandidates(query, folderId ?? null)
+          .then(setResults)
+          .catch((error) =>
+            console.error("findMentionCandidates failed", error)
+          );
+      },
+      query ? 150 : 0
+    );
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [query, open, folderId]);
+
+  const selectedIds = new Set(selected.map((d) => d.id));
+  const unlinked = results.filter((r) => !selectedIds.has(r.id));
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {selected.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {selected.map((doc) => (
+            <li
+              key={doc.id}
+              className="flex items-center justify-between gap-2 rounded-md border border-input px-2 py-1 text-sm"
+            >
+              <span className="flex min-w-0 items-center gap-1.5">
+                <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{doc.name}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => onRemove(doc.id)}
+                aria-label={`Remove ${doc.name}`}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        aria-pressed={open}
+        className="justify-start"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <LinkIcon className="size-3.5" />
+        Connect document
+      </Button>
+
+      {open && (
+        <div className="overflow-hidden rounded-lg border border-border bg-popover">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search documents…"
+            autoFocus
+            className="w-full border-b border-border bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
+          />
+          <ul className="max-h-44 overflow-y-auto py-1">
+            {unlinked.length === 0 ? (
+              <li className="px-3 py-2 text-sm text-muted-foreground">
+                No matching documents
+              </li>
+            ) : (
+              unlinked.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onAdd({ id: item.id, name: item.name, type: item.type });
+                      setQuery("");
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent/50"
+                  >
+                    <PlusIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{item.name}</span>
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface TaskModalProps {
   open: boolean;
   /** "add" creates a new task; "edit" views/edits an existing one (Save). */
@@ -92,6 +278,10 @@ interface TaskModalProps {
   task?: Task | null;
   /** Selectable assignees ("Me" plus contractors from the People page). */
   assignees: string[];
+  /** All tasks on the board — the candidates for the "Blocked by" picker. */
+  allTasks?: Task[];
+  /** Folder to scope the "Connect document" search to (a project's files). */
+  searchFolderId?: string;
   /** Default column for a newly added task. */
   defaultStatus?: TaskStatus;
 }
@@ -108,6 +298,8 @@ export function TaskModal({
   onSubmit,
   task,
   assignees,
+  allTasks = [],
+  searchFolderId,
   defaultStatus = "planned",
 }: TaskModalProps) {
   const [title, setTitle] = useState("");
@@ -117,6 +309,10 @@ export function TaskModal({
   const [status, setStatus] = useState<TaskStatus>(defaultStatus);
   const [deadline, setDeadline] = useState("");
   const [deadlineTime, setDeadlineTime] = useState("");
+  // Ids of the tasks that block this one.
+  const [blockedBy, setBlockedBy] = useState<string[]>([]);
+  // Documents connected to this task.
+  const [documents, setDocuments] = useState<TaskDocument[]>([]);
   // Budget / spend held as strings so the field can be empty (no budget line).
   const [budget, setBudget] = useState("");
   const [spend, setSpend] = useState("");
@@ -136,9 +332,32 @@ export function TaskModal({
       setDeadlineTime(task?.deadlineTime ?? "");
       setBudget(task?.budget != null ? String(task.budget) : "");
       setSpend(task?.spend != null ? String(task.spend) : "");
+      setBlockedBy(task?.blockedBy ?? []);
+      setDocuments(task?.documents ?? []);
       setEditorKey((k) => k + 1);
     }
   }, [open, task, defaultStatus]);
+
+  // Any task except this one (a task can't block itself) is a blocker candidate.
+  const blockerOptions: BlockerOption[] = allTasks
+    .filter((t) => t.id !== task?.id)
+    .map((t) => ({ id: t.id, title: t.title }));
+
+  function toggleBlocker(id: string, next: boolean) {
+    setBlockedBy((prev) =>
+      next ? [...prev, id] : prev.filter((x) => x !== id)
+    );
+  }
+
+  function addDocument(doc: TaskDocument) {
+    setDocuments((prev) =>
+      prev.some((d) => d.id === doc.id) ? prev : [...prev, doc]
+    );
+  }
+
+  function removeDocument(id: string) {
+    setDocuments((prev) => prev.filter((d) => d.id !== id));
+  }
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -160,6 +379,8 @@ export function TaskModal({
       deadlineTime: deadline && deadlineTime ? deadlineTime : undefined,
       budget: budgetNum != null && !Number.isNaN(budgetNum) ? budgetNum : undefined,
       spend: spendNum != null && !Number.isNaN(spendNum) ? spendNum : undefined,
+      blockedBy: blockedBy.length > 0 ? blockedBy : undefined,
+      documents: documents.length > 0 ? documents : undefined,
     });
     onClose();
   }
@@ -242,6 +463,34 @@ export function TaskModal({
                   label: c.label,
                 }))}
                 onChange={(value) => setStatus(value as TaskStatus)}
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium">Blocked by</span>
+              <BlockedByDropdown
+                options={blockerOptions}
+                selected={blockedBy}
+                onToggle={toggleBlocker}
+              />
+              {blockedBy.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Waiting on{" "}
+                  {blockedBy.length === 1
+                    ? "1 task"
+                    : `${blockedBy.length} tasks`}{" "}
+                  to finish first.
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium">Documents</span>
+              <TaskDocumentsField
+                selected={documents}
+                folderId={searchFolderId}
+                onAdd={addDocument}
+                onRemove={removeDocument}
               />
             </div>
 

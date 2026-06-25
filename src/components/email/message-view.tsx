@@ -20,6 +20,12 @@ import {
 } from "@/components/ui/tooltip";
 import type { Message } from "@/lib/email/mailbox";
 import { initials, fullTime } from "@/lib/email/format";
+import { EmailHtmlFrame } from "./email-html-frame";
+
+/** Heuristic for plain-text bodies that actually contain HTML markup. */
+function looksLikeHtml(s: string): boolean {
+  return /<(!doctype|html|body|div|table|p|a|br|img|span)\b/i.test(s);
+}
 
 function ActionButton({
   label,
@@ -65,6 +71,8 @@ export function MessageView({
   }
 
   const recipients = message.to.map((t) => t.name).join(", ") || "(no recipient)";
+  const htmlBody =
+    message.bodyHtml ?? (looksLikeHtml(message.body) ? message.body : null);
 
   return (
     <div className="flex h-full flex-1 flex-col bg-background">
@@ -134,13 +142,19 @@ export function MessageView({
             </div>
           </div>
 
-          <div className="mt-6 space-y-4 text-sm leading-relaxed text-foreground/90">
-            {message.body.split(/\n{2,}/).map((para, i) => (
-              <p key={i} className="whitespace-pre-wrap">
-                {para}
-              </p>
-            ))}
-          </div>
+          {htmlBody ? (
+            <div className="mt-6">
+              <EmailHtmlFrame html={htmlBody} />
+            </div>
+          ) : (
+            <div className="mt-6 space-y-4 text-sm leading-relaxed text-foreground/90">
+              {message.body.split(/\n{2,}/).map((para, i) => (
+                <p key={i} className="whitespace-pre-wrap">
+                  {para}
+                </p>
+              ))}
+            </div>
+          )}
 
           {message.attachments && message.attachments.length > 0 && (
             <div className="mt-8 border-t pt-4">

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth/permissions";
+import { getSessionUser } from "@/lib/auth/session";
 
 /**
  * Save/disconnect Google Workspace credentials from the Settings UI. Admin-only
@@ -32,9 +33,11 @@ export async function saveGoogleWorkspaceSettings(
   input: SaveGoogleWorkspaceInput
 ): Promise<void> {
   await requireAdmin();
+  const user = await getSessionUser();
+  if (!user) throw new Error("saveGoogleWorkspaceSettings: not signed in");
 
-  const update: Record<string, string | boolean | null> = {
-    id: true,
+  const update: Record<string, string | null> = {
+    owner_id: user.id,
     google_client_id: input.clientId.trim() || null,
     google_user_email: input.userEmail.trim() || null,
   };
@@ -48,7 +51,7 @@ export async function saveGoogleWorkspaceSettings(
 
   const { error } = await getSupabaseAdmin()
     .from("integration_settings")
-    .upsert(update, { onConflict: "id" });
+    .upsert(update, { onConflict: "owner_id" });
   if (error) throw new Error(`saveGoogleWorkspaceSettings: ${error.message}`);
 
   refreshConsumers();
@@ -57,17 +60,19 @@ export async function saveGoogleWorkspaceSettings(
 /** Clear all stored Google Workspace credentials. */
 export async function disconnectGoogleWorkspace(): Promise<void> {
   await requireAdmin();
+  const user = await getSessionUser();
+  if (!user) throw new Error("disconnectGoogleWorkspace: not signed in");
   const { error } = await getSupabaseAdmin()
     .from("integration_settings")
     .upsert(
       {
-        id: true,
+        owner_id: user.id,
         google_client_id: null,
         google_client_secret: null,
         google_refresh_token: null,
         google_user_email: null,
       },
-      { onConflict: "id" }
+      { onConflict: "owner_id" }
     );
   if (error) throw new Error(`disconnectGoogleWorkspace: ${error.message}`);
   refreshConsumers();

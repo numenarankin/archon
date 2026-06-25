@@ -171,8 +171,15 @@ export function ArchonChat({ conversation, onMessagesChange }: ArchonChatProps) 
       seededRef.current = false;
       return;
     }
+    // Don't mirror to the parent store mid-stream. useChat's message snapshot is
+    // live and un-throttled (only its notifications are throttled), so pushing on
+    // every streamed delta makes the parent re-render ArchonChat from above, which
+    // re-reads a newer snapshot and re-fires this effect synchronously — a feedback
+    // loop that trips React's "Maximum update depth exceeded" on long, tool-heavy
+    // turns. Wait for the turn to settle, then propagate the final messages once.
+    if (isBusy) return;
     onMessagesChange(messages);
-  }, [messages, onMessagesChange]);
+  }, [messages, isBusy, onMessagesChange]);
 
   useEffect(() => {
     const el = scrollerRef.current;

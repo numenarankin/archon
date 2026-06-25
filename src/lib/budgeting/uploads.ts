@@ -2,8 +2,8 @@ import "server-only";
 import { hasSupabase } from "@/lib/env";
 import { getSupabaseServer } from "@/lib/supabase/server";
 
-/** One uploaded accounting file (a batch of transactions) shown in the Uploads tab. */
-export interface AccountingUpload {
+/** One uploaded file (a batch of transactions) shown in the Uploads tab. */
+export interface BudgetUpload {
   id: string;
   fileName: string;
   mime: string | null;
@@ -25,7 +25,7 @@ interface UploadRow {
   created_at: string;
 }
 
-function mapUpload(r: UploadRow): AccountingUpload {
+function mapUpload(r: UploadRow): BudgetUpload {
   return {
     id: r.id,
     fileName: r.file_name ?? "",
@@ -37,12 +37,12 @@ function mapUpload(r: UploadRow): AccountingUpload {
   };
 }
 
-/** Every upload batch for the org, newest first. */
-export async function getUploads(): Promise<AccountingUpload[]> {
+/** Every upload batch, newest first. */
+export async function getUploads(): Promise<BudgetUpload[]> {
   if (!hasSupabase()) return [];
   const sb = await getSupabaseServer();
   const { data, error } = await sb
-    .from("accounting_uploads")
+    .from("budget_uploads")
     .select("id, file_name, mime, size, txn_count, total_amount, created_at")
     .order("created_at", { ascending: false });
   if (error) throw new Error(`getUploads: ${error.message}`);

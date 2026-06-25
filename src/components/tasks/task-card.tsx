@@ -1,17 +1,24 @@
 "use client";
 
-import type { Ref } from "react";
-import { useDrag } from "react-dnd";
-import { CalendarClockIcon } from "lucide-react";
+import { useCallback, useRef } from "react";
+import { useDrag, useDrop } from "react-dnd";
+import { BanIcon, CalendarClockIcon, PaperclipIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { to12Hour } from "@/lib/calendar/dates";
-import { descriptionPreview, type Task, type TaskPriority } from "@/lib/tasks/tasks";
+import {
+  descriptionPreview,
+  type Task,
+  type TaskPriority,
+  type TaskStatus,
+} from "@/lib/tasks/tasks";
 
 /** Drag item type shared between cards and columns. */
 export const TASK_DND_TYPE = "task";
 
 export interface TaskDragItem {
   id: string;
+  /** Column the card is currently in; updated as it's dragged across columns. */
+  status: TaskStatus;
 }
 
 const PRIORITY_STYLES: Record<TaskPriority, string> = {
@@ -34,32 +41,85 @@ function formatDeadline(date: string, time?: string): string {
 
 export function TaskCard({
   task,
+  openBlockerCount = 0,
   onOpen,
+  onReorder,
+  onPersist,
 }: {
   task: Task;
+  /** How many of this task's blockers are still open (not done). */
+  openBlockerCount?: number;
   onOpen?: (task: Task) => void;
+  /** Reposition the dragged card relative to this one (live, while hovering). */
+  onReorder?: (
+    dragId: string,
+    targetId: string,
+    placeAfter: boolean,
+    status: TaskStatus
+  ) => void;
+  /** Save the board order once the drag ends. */
+  onPersist?: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+
   const [{ isDragging }, dragRef] = useDrag<
     TaskDragItem,
     unknown,
     { isDragging: boolean }
   >(() => ({
     type: TASK_DND_TYPE,
-    item: { id: task.id },
+    item: { id: task.id, status: task.status },
+    end: () => onPersist?.(),
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
-  }), [task.id]);
+  }), [task.id, task.status, onPersist]);
+
+  // Drop target so another card can be dropped above/below this one. Returning
+  // a result marks the drop handled, so the column's drop (drop-to-end) skips.
+  const [, dropRef] = useDrop<TaskDragItem, { handled: boolean }, unknown>(() => ({
+    accept: TASK_DND_TYPE,
+    drop: () => ({ handled: true }),
+    hover: (item, monitor) => {
+      if (!onReorder || item.id === task.id) return;
+      const node = ref.current;
+      const offset = monitor.getClientOffset();
+      if (!node || !offset) return;
+      const rect = node.getBoundingClientRect();
+      const placeAfter = offset.y - rect.top > rect.height / 2;
+      onReorder(item.id, task.id, placeAfter, task.status);
+      // Keep the drag item's column in sync so cross-column moves persist.
+      item.status = task.status;
+    },
+  }), [task.id, task.status, onReorder]);
+
+  // Compose the drag + drop connectors and keep our own node ref (used for the
+  // hover midpoint math) in a single callback ref, so the connectors run after
+  // render rather than during it.
+  const attachRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      ref.current = node;
+      dragRef(node);
+      dropRef(node);
+    },
+    [dragRef, dropRef]
+  );
 
   const preview = descriptionPreview(task.description);
 
   return (
     <div
-      ref={dragRef as unknown as Ref<HTMLDivElement>}
+      ref={attachRef}
       onClick={() => onOpen?.(task)}
       className={cn(
         "cursor-pointer rounded-lg border bg-card p-3 shadow-sm transition-colors hover:border-foreground/20",
         isDragging && "opacity-40"
       )}
     >
+      {openBlockerCount > 0 && (
+        <span className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+          <BanIcon className="size-3" />
+          Blocked by {openBlockerCount}
+        </span>
+      )}
       <p className="text-sm font-medium leading-snug text-foreground">
         {task.title}
       </p>
@@ -79,6 +139,17 @@ export function TaskCard({
           {task.priority}
         </span>
         <div className="flex min-w-0 items-center gap-2">
+          {task.documents && task.documents.length > 0 && (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+              title={`${task.documents.length} linked document${
+                task.documents.length === 1 ? "" : "s"
+              }`}
+            >
+              <PaperclipIcon className="size-3.5" />
+              {task.documents.length}
+            </span>
+          )}
           {task.deadline && (
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
               <CalendarClockIcon className="size-3.5" />

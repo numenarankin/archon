@@ -16,6 +16,8 @@ interface ArchonSkillRow {
   category: string;
   examples: string[] | null;
   enabled: boolean;
+  tool_names: string[] | null;
+  content: string | null;
 }
 
 function mapSkill(r: ArchonSkillRow): ArchonSkill {
@@ -25,7 +27,9 @@ function mapSkill(r: ArchonSkillRow): ArchonSkill {
     description: r.description ?? "",
     category: r.category as SkillCategory,
     icon: "sparkles",
-    tools: ["custom"],
+    // The user-selected tool allowlist (from the skill editor's tool picker).
+    tools: r.tool_names ?? [],
+    content: r.content ?? "",
     examples: r.examples ?? [],
     // For stored skills, this carries the live enabled state (used to seed the
     // UI toggle and to decide what goes into the prompt).
@@ -45,7 +49,9 @@ export async function getCustomSkills(): Promise<ArchonSkill[]> {
     const sb = await getSupabaseServer();
     const { data, error } = await sb
       .from("archon_skills")
-      .select("id, name, description, category, examples, enabled")
+      .select(
+        "id, name, description, category, examples, enabled, tool_names, content"
+      )
       .order("created_at", { ascending: false });
     if (error) throw error;
     return ((data ?? []) as ArchonSkillRow[]).map(mapSkill);

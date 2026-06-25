@@ -35,7 +35,7 @@ import {
   FINANCIAL_METRIC_ORDER,
   type FinancialMetric,
   type FinancialPoint,
-} from "@/lib/accounting/types";
+} from "@/lib/budgeting/types";
 
 const TIME_RANGES = [
   { value: "6M", months: 6 },
@@ -85,12 +85,12 @@ interface FinancialChartProps {
 }
 
 /**
- * Financial-performance line chart. A dropdown in the top-right selects which
- * series (net revenue, expenses, or cash flow) is plotted and titles the chart;
- * range buttons limit the window. Shared by the overview and per-well pages.
+ * Cash-flow line chart. A dropdown in the top-right selects which series
+ * (income, expenses, or net cash flow) is plotted and titles the chart; range
+ * buttons limit the window.
  */
 export function FinancialChart({ data }: FinancialChartProps) {
-  const [metric, setMetric] = useState<FinancialMetric>("netRevenue");
+  const [metric, setMetric] = useState<FinancialMetric>("net");
   const [range, setRange] = useState<TimeRange>("12M");
 
   const months =

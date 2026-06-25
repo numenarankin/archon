@@ -5,31 +5,22 @@ import * as XLSX from "xlsx";
 import { getSupabaseAdmin, getSupabaseServer } from "@/lib/supabase/server";
 import { forbidUnlessPermitted } from "@/lib/auth/permissions";
 import { gateAI, meterAnthropic } from "@/lib/billing/credits";
-import { getWells } from "@/lib/wells/wells";
-import { getAccountingCategories } from "@/lib/accounting/org-categories";
-import {
-  ACCOUNTING_UPLOAD_BUCKET,
-  isOwnedStorageKey,
-} from "@/lib/accounting/storage";
-import type { Category } from "@/lib/accounting/categories";
+import { getBudgetCategories, type Category } from "@/lib/budgeting/categories";
+import { BUDGET_UPLOAD_BUCKET } from "@/lib/budgeting/storage";
 
 // OCR + reasoning over a document can take a while.
 export const maxDuration = 120;
 
 /** Schema the model fills per transaction — mirrors DraftTransaction. */
 const txnSchema = z.object({
-  kind: z.enum(["revenue", "expense"]),
-  counterparty: z.string(),
+  kind: z.enum(["income", "expense"]),
+  payee: z.string(),
   amount: z.number(),
   date: z.string(),
   category: z.string(),
   categoryCode: z.string(),
-  invoiceNumber: z.string(),
-  wellId: z.string(),
-  volume: z.number().nullable(),
-  price: z.number().nullable(),
-  prodTax: z.number().nullable(),
-  nri: z.number().nullable(),
+  note: z.string(),
+  account: z.string(),
 });
 
 const IMAGE_TYPES: Record<string, string> = {
@@ -50,7 +41,11 @@ function buildDocumentPart(name: string, buf: Buffer): ContentPart {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
 
   if (ext === "pdf") {
-    return { type: "file", data: new Uint8Array(buf), mediaType: "application/pdf" };
+    return {
+      type: "file",
+      data: new Uint8Array(buf),
+      mediaType: "application/pdf",
+    };
   }
   if (ext in IMAGE_TYPES) {
     return { type: "image", image: new Uint8Array(buf) };
@@ -69,79 +64,41 @@ function buildDocumentPart(name: string, buf: Buffer): ContentPart {
   throw new Error(`Unsupported file type: .${ext}`);
 }
 
-function buildSystemPrompt(
-  wells: { id: string; name: string }[],
-  categories: Category[]
-): string {
+function buildSystemPrompt(categories: Category[]): string {
   const categoryList = categories
     .map((c) => `- ${c.code} — ${c.label} (${c.kind})`)
     .join("\n");
-  const wellList = wells.map((w) => `- ${w.id} — ${w.name}`).join("\n") || "(none)";
 
   return [
-    "You are an oil & gas accounting assistant. Extract every distinct financial",
-    "transaction from the attached document into structured ledger entries.",
-    "Make a best attempt at every field, but leave a field blank (\"\") or null",
-    "when the document does not specify it — never invent values.",
+    "You are a personal-finance assistant. Extract every distinct transaction",
+    "from the attached document (a bank or credit-card statement, a receipt, or",
+    "an invoice) into structured ledger entries. Make a best attempt at every",
+    'field, but leave a field blank ("") when the document does not specify it —',
+    "never invent values.",
     "",
     "Field rules:",
-    "- dateReasoning: BEFORE listing transactions, write 1-3 sentences identifying",
-    "  the document type (e.g. revenue/run statement, expense invoice, JIB, mixed),",
-    "  the single governing date you will apply to each section, and exactly how you",
-    "  derived it (for revenue: the production month you found, plus one). This field",
-    "  is your scratchpad — reason here first so the per-row dates are consistent.",
-    '- kind: "revenue" for money received, "expense" for money paid out.',
-    "- amount: the positive net dollar amount.",
-    "- date: ISO YYYY-MM-DD — the cash-basis month the entry belongs to.",
-    "  A single document almost always covers ONE period. FIRST decide the governing",
-    "  date for the document — and, if it mixes revenue and expenses, the governing",
-    "  date for each section — then give EVERY transaction in that section the SAME",
-    "  date. Do NOT vary the date line by line unless the document explicitly prints",
-    "  a different date for a specific line. Think this through in `dateReasoning`",
-    "  (see below) BEFORE you list any transactions.",
-    "  The one-month offset below is REVENUE-ONLY. Expense dates are NEVER shifted,",
-    "  forward or backward, under any circumstances.",
-    "  REVENUE — derive the governing date in two steps, do NOT guess:",
-    "    1. Find the PRODUCTION date in the revenue / settlement section of the",
-    '       document — the month the oil or gas was actually produced or sold.',
-    '       Look for labels like "Production Date", "Production Month",',
-    '       "Production Period", "Sales Date", "Sales Month", "Prod Date", or a',
-    "       production/accounting period column. Use ONLY a date from that",
-    "       revenue section. Do NOT pick an unrelated date (check date, print",
-    "       date, statement date, run/processed date) and hope it is correct — if",
-    '       no production date is shown in the revenue section, leave date blank ("").',
-    "    2. OFFSET that production date forward by exactly one calendar month and",
-    "       output the result. Revenue checks are received the month AFTER",
-    "       production, so production in April is recorded in May. Keep the same",
-    "       day-of-month when a full date is given (e.g. production 2026-04-30 →",
-    '       "2026-05-30"); if only a month is given with no day, use the first of',
-    '       the following month (e.g. "April 2026" → "2026-05-01").',
-    "  EXPENSE — copy the bill / invoice / billing / statement date VERBATIM (a bill",
-    '       dated 05/31 → "2026-05-31"). NEVER offset an expense date, and never',
-    "       apply the revenue production rule to an expense. If several dates appear,",
-    "       use the invoice/billing/statement date, not a service-period or due date.",
+    '- kind: "income" for money received, "expense" for money paid out. On a card',
+    "  or bank statement, purchases/charges/debits are expenses; deposits,",
+    "  payments received, credits, and refunds are income.",
+    "- amount: the positive dollar amount, with no sign.",
+    "- date: ISO YYYY-MM-DD — the date printed for that specific line item. Copy",
+    "  each line's own date verbatim; never shift or offset it.",
+    "- payee: the merchant or recipient (expense), or the source/payer (income).",
     "- categoryCode + category: pick the single best fit from this list and use",
     "  BOTH the code and its exact label; otherwise leave both blank:",
     categoryList,
-    "- wellId: match to one of these wells by name and use its id; blank if unclear:",
-    wellList,
-    "- counterparty: the payer (revenue) or recipient/vendor (expense).",
-    "- invoiceNumber: the document/invoice number if present.",
-    "- Revenue only — volume (units sold), price (per-unit), prodTax (production/",
-    "  severance tax), nri (net revenue interest as a decimal). Use null for",
-    "  expenses or when unknown.",
+    '- account: the account name or nickname the document shows (e.g. a card name',
+    '  or the last 4 digits), else "".',
+    '- note: any memo, reference, or confirmation/invoice number worth keeping,',
+    '  else "".',
   ].join("\n");
 }
 
 export async function POST(req: Request) {
   // Everything runs inside one try so the handler ALWAYS responds with JSON.
-  // An uncaught throw here (Supabase init, formData parsing, getWells) would
-  // otherwise make Next render an HTML error page, and the client's
-  // `res.json()` then fails with "Unexpected token '<', "<!DOCTYPE"...".
   try {
-    // Capability gate: document extraction writes accounting drafts, so it
-    // requires `manage_accounting` — enforced here, not just on the page.
-    const denied = await forbidUnlessPermitted("manage_accounting");
+    // Document extraction spends AI credits, so it requires `use_ai`.
+    const denied = await forbidUnlessPermitted("use_ai");
     if (denied) return denied;
 
     const sb = await getSupabaseServer();
@@ -153,12 +110,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // The file was streamed straight to private Storage by the browser (so it
-    // bypasses the serverless request-body cap); we receive only a reference.
+    // The file was streamed straight to private Storage by the browser; we
+    // receive only a reference.
     const body = (await req.json().catch(() => null)) as
       | { storageKey?: unknown; fileName?: unknown }
       | null;
-    const storageKey = typeof body?.storageKey === "string" ? body.storageKey : "";
+    const storageKey =
+      typeof body?.storageKey === "string" ? body.storageKey : "";
     const fileName = typeof body?.fileName === "string" ? body.fileName : "";
     if (!storageKey || !fileName) {
       return Response.json(
@@ -167,17 +125,20 @@ export async function POST(req: Request) {
       );
     }
 
-    // Verify the key belongs to the caller's org before reading it with the
-    // admin client (which bypasses RLS) — stops cross-org file reads.
-    const { data: orgId } = await sb.rpc("current_org_id");
-    if (!orgId || !isOwnedStorageKey(storageKey, orgId as string)) {
+    // The object is fetched with the RLS-bypassing admin client below, so verify
+    // the key belongs to the caller first. budget-uploads keys are namespaced
+    // `<owner_id>/<uuid>`; without this any user could extract another's upload.
+    const {
+      data: { user },
+    } = await sb.auth.getUser();
+    if (!user || !storageKey.startsWith(`${user.id}/`)) {
       return Response.json({ error: "File not found" }, { status: 404 });
     }
 
     let documentPart: ContentPart;
     try {
       const { data: blob, error: dlErr } = await getSupabaseAdmin()
-        .storage.from(ACCOUNTING_UPLOAD_BUCKET)
+        .storage.from(BUDGET_UPLOAD_BUCKET)
         .download(storageKey);
       if (dlErr || !blob) {
         throw new Error(dlErr?.message ?? "File not found in storage");
@@ -191,27 +152,18 @@ export async function POST(req: Request) {
       );
     }
 
-    const [wellRows, categories] = await Promise.all([
-      getWells(),
-      getAccountingCategories(),
-    ]);
-    const wells = wellRows.map((w) => ({ id: w.id, name: w.name }));
+    const categories = getBudgetCategories();
 
     const { object, usage } = await generateObject({
       model: anthropic("claude-opus-4-8"),
-      // Generous output ceiling: a statement can have many rows, and the
-      // reason-first `dateReasoning` field adds text on top. Without this the
+      // Generous output ceiling: a statement can have many rows. Without this the
       // Anthropic provider defaults to a low cap (~4096), which truncates the
       // JSON on larger documents and makes generateObject throw.
       maxOutputTokens: 16000,
-      // `dateReasoning` is first so the model commits to the document's governing
-      // date(s) before emitting rows — a reason-first step that keeps per-row
-      // dates consistent. It's consumed for its effect on `transactions`, not stored.
       schema: z.object({
-        dateReasoning: z.string(),
         transactions: z.array(txnSchema),
       }),
-      system: buildSystemPrompt(wells, categories),
+      system: buildSystemPrompt(categories),
       messages: [
         {
           role: "user",
@@ -228,16 +180,15 @@ export async function POST(req: Request) {
 
     void meterAnthropic(
       { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
-      "accounting:extract",
+      "budget:extract",
       sb
     );
 
     return Response.json({ transactions: object.transactions });
   } catch (error) {
     console.error("Transaction extraction failed", error);
-    // Surface the underlying cause (e.g. token truncation, model refusal,
-    // schema-validation failure) so failures are diagnosable instead of opaque.
-    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    const detail =
+      error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     return Response.json(
       { error: "Failed to extract transactions from the document.", detail },
       { status: 500 }

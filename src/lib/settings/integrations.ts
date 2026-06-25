@@ -2,6 +2,7 @@ import "server-only";
 
 import { hasSupabase } from "@/lib/env";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/auth/session";
 
 /**
  * Integration credentials store (Google Workspace for Gmail + Calendar).
@@ -23,15 +24,23 @@ interface IntegrationRow {
   google_user_email: string | null;
 }
 
-/** Read the singleton row, tolerating an unconfigured DB or a missing table. */
+/**
+ * Read the current user's integration row (per-user secrets), tolerating an
+ * unconfigured DB, no session, or a missing table. Uses the admin client because
+ * the table has no anon/authenticated policies, scoped explicitly to the caller's
+ * owner_id. Falls back (null) to the env vars when nothing is stored.
+ */
 async function readRow(): Promise<IntegrationRow | null> {
   if (!hasSupabase()) return null;
   try {
+    const user = await getSessionUser();
+    if (!user) return null;
     const { data, error } = await getSupabaseAdmin()
       .from("integration_settings")
       .select(
         "google_client_id, google_client_secret, google_refresh_token, google_user_email"
       )
+      .eq("owner_id", user.id)
       .maybeSingle();
     // Table not migrated yet, or any transient error: fall back to env vars.
     if (error) return null;

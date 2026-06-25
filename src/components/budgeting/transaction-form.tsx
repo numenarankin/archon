@@ -8,13 +8,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { categoriesFor, type Category } from "@/lib/accounting/categories";
-import type { DraftTransaction, TransactionKind } from "@/lib/accounting/types";
-
-export interface WellOption {
-  id: string;
-  name: string;
-}
+import { categoriesFor, type Category } from "@/lib/budgeting/categories";
+import type { DraftTransaction, TransactionKind } from "@/lib/budgeting/types";
 
 const FIELD =
   "h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
@@ -22,41 +17,25 @@ const FIELD =
 interface TransactionFormProps {
   value: DraftTransaction;
   onChange: (patch: Partial<DraftTransaction>) => void;
-  wells: WellOption[];
-  /** The org's chart of accounts (drives the category dropdown). */
+  /** The budget category list (drives the category dropdown). */
   categories: Category[];
 }
 
 /**
  * The editable fields of a single transaction. Used standalone (manual entry)
- * and inside the OCR draft editor. Revenue-only fields (volume, price, prod
- * tax, NRI) are shown only when the kind is "revenue".
+ * and inside the OCR draft editor.
  */
 export function TransactionForm({
   value,
   onChange,
-  wells,
   categories,
 }: TransactionFormProps) {
   const kindCategories = categoriesFor(categories, value.kind);
-  const isRevenue = value.kind === "revenue";
+  const isIncome = value.kind === "income";
 
-  // Switching kind clears the category (its options change) and the
-  // revenue-only fields when moving to an expense.
+  // Switching kind clears the category (its options change).
   function setKind(kind: TransactionKind) {
-    onChange(
-      kind === "expense"
-        ? {
-            kind,
-            category: "",
-            categoryCode: "",
-            volume: null,
-            price: null,
-            prodTax: null,
-            nri: null,
-          }
-        : { kind, category: "", categoryCode: "" }
-    );
+    onChange({ kind, category: "", categoryCode: "" });
   }
 
   function setCategory(code: string | null) {
@@ -68,12 +47,15 @@ export function TransactionForm({
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Type">
-          <Select value={value.kind} onValueChange={(v) => setKind(v as TransactionKind)}>
+          <Select
+            value={value.kind}
+            onValueChange={(v) => setKind(v as TransactionKind)}
+          >
             <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="revenue">Revenue</SelectItem>
+              <SelectItem value="income">Income</SelectItem>
               <SelectItem value="expense">Expense</SelectItem>
             </SelectContent>
           </Select>
@@ -88,11 +70,11 @@ export function TransactionForm({
         </Field>
       </div>
 
-      <Field label={isRevenue ? "Payer" : "Recipient"}>
+      <Field label={isIncome ? "Source" : "Payee / Merchant"}>
         <input
-          value={value.counterparty}
-          onChange={(e) => onChange({ counterparty: e.target.value })}
-          placeholder={isRevenue ? "e.g. Plains Marketing" : "e.g. ABC Pumping"}
+          value={value.payee}
+          onChange={(e) => onChange({ payee: e.target.value })}
+          placeholder={isIncome ? "e.g. Acme Payroll" : "e.g. Whole Foods"}
           className={FIELD}
         />
       </Field>
@@ -112,70 +94,32 @@ export function TransactionForm({
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Well">
-          <Select
-            value={value.wellId}
-            onValueChange={(v) => onChange({ wellId: v ?? "" })}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select well" />
-            </SelectTrigger>
-            <SelectContent>
-              {wells.map((w) => (
-                <SelectItem key={w.id} value={w.id}>
-                  {w.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label={isRevenue ? "Net Amount ($)" : "Amount ($)"}>
-          <NumberField
-            value={value.amount}
-            onValue={(n) => onChange({ amount: n ?? 0 })}
-          />
-        </Field>
-        <Field label="Invoice #">
+        <Field label="Account">
           <input
-            value={value.invoiceNumber}
-            onChange={(e) => onChange({ invoiceNumber: e.target.value })}
-            placeholder="—"
+            value={value.account}
+            onChange={(e) => onChange({ account: e.target.value })}
+            placeholder="e.g. Checking"
             className={FIELD}
           />
         </Field>
       </div>
 
-      {isRevenue ? (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Volume">
-            <NumberField
-              value={value.volume}
-              onValue={(n) => onChange({ volume: n })}
-            />
-          </Field>
-          <Field label="Price ($)">
-            <NumberField
-              value={value.price}
-              onValue={(n) => onChange({ price: n })}
-            />
-          </Field>
-          <Field label="WRK-1 NRI">
-            <NumberField
-              value={value.nri}
-              onValue={(n) => onChange({ nri: n })}
-            />
-          </Field>
-          <Field label="Prod Tax ($)">
-            <NumberField
-              value={value.prodTax}
-              onValue={(n) => onChange({ prodTax: n })}
-            />
-          </Field>
-        </div>
-      ) : null}
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Amount ($)">
+          <NumberField
+            value={value.amount}
+            onValue={(n) => onChange({ amount: n ?? 0 })}
+          />
+        </Field>
+        <Field label="Note">
+          <input
+            value={value.note}
+            onChange={(e) => onChange({ note: e.target.value })}
+            placeholder="—"
+            className={FIELD}
+          />
+        </Field>
+      </div>
     </div>
   );
 }

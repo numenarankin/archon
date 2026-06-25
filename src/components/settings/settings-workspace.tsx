@@ -6,23 +6,28 @@ import { useCan } from "@/components/auth/permissions-context";
 import { ProfileSection } from "@/components/settings/profile-section";
 import { OrganizationSection } from "@/components/settings/organization-section";
 import { IntegrationsSection } from "@/components/settings/integrations-section";
+import { ArchonSection } from "@/components/settings/archon-section";
 import type { Profile } from "@/lib/settings/profile";
 import type { OrgMember } from "@/lib/settings/org";
 import type { GoogleWorkspaceSettingsView } from "@/lib/settings/integrations";
+import type { ArchonSkill } from "@/lib/archon/skills";
+import type { ContextDoc } from "@/lib/ai/context/docs";
 
-type Section = "profile" | "organization" | "integrations";
+type Section = "profile" | "organization" | "integrations" | "archon";
 
 const NAV: ReadonlyArray<{ id: Section; label: string }> = [
   { id: "profile", label: "Profile" },
   { id: "organization", label: "Organization" },
   { id: "integrations", label: "Integrations" },
+  { id: "archon", label: "Archon" },
 ];
 
 function isSection(value: string | undefined): value is Section {
   return (
     value === "profile" ||
     value === "organization" ||
-    value === "integrations"
+    value === "integrations" ||
+    value === "archon"
   );
 }
 
@@ -32,6 +37,8 @@ export function SettingsWorkspace({
   referralCode,
   companyAddress,
   googleSettings,
+  customSkills,
+  contextDocs,
   initialSection,
   appUrl,
 }: {
@@ -41,6 +48,10 @@ export function SettingsWorkspace({
   companyAddress: string | null;
   /** Redacted Google Workspace integration settings for the Integrations tab. */
   googleSettings: GoogleWorkspaceSettingsView;
+  /** Team's custom Archon skills for the Archon tab. */
+  customSkills: ArchonSkill[];
+  /** Archon's editable context documents for the Archon tab. */
+  contextDocs: ContextDoc[];
   /** Tab to open initially (e.g. from a ?section= link). */
   initialSection?: string;
   /** Public base URL (server-resolved) for the referral link. */
@@ -97,6 +108,9 @@ export function SettingsWorkspace({
         )}
         {isAdmin && section === "integrations" && (
           <IntegrationsSection google={googleSettings} />
+        )}
+        {isAdmin && section === "archon" && (
+          <ArchonSection customSkills={customSkills} docs={contextDocs} />
         )}
       </div>
     </div>

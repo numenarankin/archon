@@ -9,8 +9,14 @@ import {
 	UsersIcon,
 	CalculatorIcon,
 	BarChart3Icon,
+	LineChartIcon,
 	MapIcon,
+	WalletIcon,
+	LandmarkIcon,
 	SettingsIcon,
+	GemIcon,
+	KanbanIcon,
+	HandshakeIcon,
 } from "lucide-react";
 import { SparkleIcon } from "@/components/ai/sparkle-icon";
 import type { PermissionKey } from "@/lib/settings/org";
@@ -84,8 +90,46 @@ export const navGroups: SidebarNavGroup[] = [
 		],
 	},
 	{
-		label: "Business",
+		label: "Numena",
 		items: [
+			{
+				// No dedicated permission yet — visible to everyone, like Email.
+				title: "Prospecting",
+				path: "/numena",
+				icon: <GemIcon />,
+			},
+			{
+				title: "Pipeline",
+				path: "/numena/pipeline",
+				icon: <KanbanIcon />,
+			},
+			{
+				title: "KPIs",
+				path: "/numena-kpis",
+				icon: <LineChartIcon />,
+			},
+			{
+				// Mercury bank dashboard. No dedicated permission — visible to
+				// everyone, like Email; gated only by the MERCURY_API_KEY env.
+				title: "Finance",
+				path: "/finance",
+				icon: <LandmarkIcon />,
+			},
+		],
+	},
+	{
+		label: "Wildcat",
+		items: [
+			{
+				title: "Pipeline",
+				path: "/wildcat/pipeline",
+				icon: <KanbanIcon />,
+			},
+			{
+				title: "Sales",
+				path: "/wildcat/sales",
+				icon: <HandshakeIcon />,
+			},
 			{
 				title: "Map",
 				path: "/map",
@@ -109,6 +153,18 @@ export const navGroups: SidebarNavGroup[] = [
 				path: "/analytics",
 				icon: <BarChart3Icon />,
 				permission: "view_analytics",
+			},
+		],
+	},
+	{
+		label: "Personal",
+		items: [
+			{
+				// No dedicated permission — personal budgeting is visible to
+				// everyone, like Email.
+				title: "Budgeting",
+				path: "/budgeting",
+				icon: <WalletIcon />,
 			},
 		],
 	},

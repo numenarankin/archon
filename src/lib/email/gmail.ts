@@ -81,18 +81,49 @@ function parseParticipants(raw: string): MailParticipant[] {
   return raw.split(",").map(parseParticipant);
 }
 
-/** Recursively pull the best plain-text body out of a Gmail payload. */
-function extractBody(payload: GmailMessagePayload | undefined): string {
+/** Recursively pull the first part of a given MIME type out of a Gmail payload. */
+function extractPart(
+  payload: GmailMessagePayload | undefined,
+  mime: string,
+): string {
   if (!payload) return "";
-  if (payload.mimeType === "text/plain" && payload.body?.data) {
+  if (payload.mimeType === mime && payload.body?.data) {
     return decodeBase64Url(payload.body.data);
   }
   for (const part of payload.parts ?? []) {
-    const text = extractBody(part);
+    const found = extractPart(part, mime);
+    if (found) return found;
+  }
+  return "";
+}
+
+/** Last-resort body for odd single-part messages with no typed part. */
+function extractAnyBody(payload: GmailMessagePayload | undefined): string {
+  if (!payload) return "";
+  if (payload.body?.data) return decodeBase64Url(payload.body.data);
+  for (const part of payload.parts ?? []) {
+    const text = extractAnyBody(part);
     if (text) return text;
   }
-  if (payload.body?.data) return decodeBase64Url(payload.body.data);
   return "";
+}
+
+/** Strip HTML to a readable plain-text fallback (for list snippets + search). */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<\/(p|div|br|tr|li|h[1-6]|table)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function extractAttachments(payload: GmailMessagePayload | undefined): string[] {
@@ -115,6 +146,12 @@ function mapGmailMessage(folder: FolderId, msg: GmailMessage): Message {
   const date = msg.internalDate
     ? new Date(Number(msg.internalDate)).toISOString()
     : new Date().toISOString();
+  const html = extractPart(msg.payload, "text/html");
+  // Plain text for the body/snippet/search: prefer a real text/plain part, else
+  // derive it from the HTML (so the raw markup never leaks into `body`).
+  const plain =
+    extractPart(msg.payload, "text/plain") ||
+    (html ? htmlToText(html) : extractAnyBody(msg.payload));
   return {
     id: msg.id,
     folder,
@@ -122,7 +159,8 @@ function mapGmailMessage(folder: FolderId, msg: GmailMessage): Message {
     to: parseParticipants(header(msg.payload, "To")),
     subject: header(msg.payload, "Subject") || "(no subject)",
     snippet: msg.snippet ?? "",
-    body: extractBody(msg.payload),
+    body: plain,
+    bodyHtml: html || undefined,
     date,
     read: !(msg.labelIds ?? []).includes("UNREAD"),
     starred: (msg.labelIds ?? []).includes("STARRED"),

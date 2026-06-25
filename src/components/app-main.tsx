@@ -31,8 +31,9 @@ export function AppMain({ children }: { children: React.ReactNode }) {
 
   // The Files page keeps the padded layout but is bound to the viewport so its
   // document viewer/editor and file table scroll inside their own panes rather
-  // than growing the whole page (matching the project workspace).
-  const fixedHeight = pathname === "/files";
+  // than growing the whole page (matching the project workspace). The sales desk
+  // does the same so the lineup, call card, and transcript scroll independently.
+  const fixedHeight = pathname === "/files" || pathname === "/wildcat/sales";
 
   // Left padding lines the content up with the topbar's page-label icon, which
   // sits past the sidebar toggle + separator, not at the header padding edge:

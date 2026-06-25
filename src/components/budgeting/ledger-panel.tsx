@@ -23,14 +23,13 @@ import { cn } from "@/lib/utils";
 import {
   deleteTransactions,
   updateTransaction,
-} from "@/lib/accounting/actions";
-import { categoriesFor, type Category } from "@/lib/accounting/categories";
-import type { WellOption } from "@/components/accounting/transaction-form";
+} from "@/lib/budgeting/actions";
+import { categoriesFor, type Category } from "@/lib/budgeting/categories";
 import type {
   DraftTransaction,
   Transaction,
   TransactionKind,
-} from "@/lib/accounting/types";
+} from "@/lib/budgeting/types";
 
 const currency = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
@@ -48,40 +47,39 @@ function addedDate(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime())
     ? iso.slice(0, 10)
-    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    : d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
 }
 
 /** Strip read-only fields, leaving the editable draft shape for persistence. */
 function toDraft(t: Transaction): DraftTransaction {
   return {
     kind: t.kind,
-    counterparty: t.counterparty,
+    payee: t.payee,
     amount: t.amount,
     date: t.date,
     category: t.category,
     categoryCode: t.categoryCode,
-    invoiceNumber: t.invoiceNumber,
-    wellId: t.wellId,
-    volume: t.volume,
-    price: t.price,
-    prodTax: t.prodTax,
-    nri: t.nri,
+    note: t.note,
+    account: t.account,
   };
 }
 
 interface LedgerPanelProps {
   transactions: Transaction[];
-  wells: WellOption[];
   categories: Category[];
 }
 
 /**
- * Chronological ledger of every transaction. Cells are edited in place — like
- * the wells royalty-owners table — committing on blur / Enter / select change.
- * A checkbox column allows multi-select and mass delete. The Added column shows
- * when each row entered the ledger.
+ * Chronological ledger of every transaction. Cells are edited in place,
+ * committing on blur / Enter / select change. A checkbox column allows
+ * multi-select and mass delete. The Added column shows when each row entered the
+ * ledger.
  */
-export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProps) {
+export function LedgerPanel({ transactions, categories }: LedgerPanelProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -100,8 +98,7 @@ export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProp
   );
 
   // Local copy so cells are controlled and edits feel instant. Re-sync whenever
-  // the server sends a fresh list (after revalidation), replacing local edits
-  // with the confirmed values.
+  // the server sends a fresh list (after revalidation).
   const [rows, setRows] = useState<Transaction[]>(sorted);
   const [syncedFrom, setSyncedFrom] = useState(transactions);
   if (syncedFrom !== transactions) {
@@ -109,8 +106,7 @@ export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProp
     setRows(sorted);
   }
 
-  // Latest rows, readable synchronously from commit handlers (blur fires in a
-  // separate event after re-render, so this is current by then).
+  // Latest rows, readable synchronously from commit handlers.
   const rowsRef = useRef(rows);
   useEffect(() => {
     rowsRef.current = rows;
@@ -141,15 +137,10 @@ export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProp
     if (row) persist(row);
   }
 
-  // Select changes patch + persist the new row directly, since state hasn't
-  // re-rendered yet when the change handler runs.
   function setKind(id: string, kind: TransactionKind) {
     const row = rowsRef.current.find((r) => r.id === id);
     if (!row) return;
-    const patch: Partial<Transaction> =
-      kind === "expense"
-        ? { kind, category: "", categoryCode: "", volume: null, price: null, prodTax: null, nri: null }
-        : { kind, category: "", categoryCode: "" };
+    const patch: Partial<Transaction> = { kind, category: "", categoryCode: "" };
     patchRow(id, patch);
     persist({ ...row, ...patch });
   }
@@ -161,13 +152,6 @@ export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProp
     const patch = { categoryCode: code, category: match?.label ?? "" };
     patchRow(id, patch);
     persist({ ...row, ...patch });
-  }
-
-  function setWell(id: string, wellId: string) {
-    const row = rowsRef.current.find((r) => r.id === id);
-    if (!row) return;
-    patchRow(id, { wellId });
-    persist({ ...row, wellId });
   }
 
   function toggle(id: string) {
@@ -230,16 +214,30 @@ export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProp
               <span className="text-sm text-muted-foreground">
                 Delete {selected.size}? This can&apos;t be undone.
               </span>
-              <Button variant="outline" size="sm" onClick={() => setConfirming(false)} disabled={pending}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirming(false)}
+                disabled={pending}
+              >
                 Cancel
               </Button>
-              <Button variant="destructive" size="sm" onClick={handleDelete} disabled={pending}>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleDelete}
+                disabled={pending}
+              >
                 {pending && <Loader2Icon className="animate-spin" />}
                 Confirm delete
               </Button>
             </div>
           ) : (
-            <Button variant="destructive" size="sm" onClick={() => setConfirming(true)}>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirming(true)}
+            >
               <Trash2Icon />
               Delete selected
             </Button>
@@ -263,9 +261,9 @@ export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProp
               </TableHead>
               <TableHead className="w-40">Date</TableHead>
               <TableHead className="w-28">Type</TableHead>
-              <TableHead>Counterparty</TableHead>
+              <TableHead>Payee</TableHead>
               <TableHead className="w-48">Category</TableHead>
-              <TableHead className="w-44">Well</TableHead>
+              <TableHead className="w-40">Account</TableHead>
               <TableHead className="w-32 text-right">Amount</TableHead>
               <TableHead className="w-32">Added</TableHead>
             </TableRow>
@@ -301,25 +299,34 @@ export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProp
                     />
                   </TableCell>
                   <TableCell>
-                    <Select value={t.kind} onValueChange={(v) => v && setKind(t.id, v as TransactionKind)}>
-                      <SelectTrigger size="sm" aria-label="Type" className={CELL_SELECT}>
+                    <Select
+                      value={t.kind}
+                      onValueChange={(v) =>
+                        v && setKind(t.id, v as TransactionKind)
+                      }
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        aria-label="Type"
+                        className={CELL_SELECT}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="revenue">Revenue</SelectItem>
+                        <SelectItem value="income">Income</SelectItem>
                         <SelectItem value="expense">Expense</SelectItem>
                       </SelectContent>
                     </Select>
                   </TableCell>
                   <TableCell>
                     <input
-                      value={t.counterparty}
+                      value={t.payee}
                       placeholder="—"
-                      onChange={(e) => patchRow(t.id, { counterparty: e.target.value })}
+                      onChange={(e) => patchRow(t.id, { payee: e.target.value })}
                       onBlur={() => commit(t.id)}
                       onKeyDown={handleKeyDown}
                       className={CELL_INPUT}
-                      aria-label="Counterparty"
+                      aria-label="Payee"
                     />
                   </TableCell>
                   <TableCell>
@@ -327,7 +334,11 @@ export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProp
                       value={t.categoryCode}
                       onValueChange={(v) => setCategory(t.id, v ?? "", t.kind)}
                     >
-                      <SelectTrigger size="sm" aria-label="Category" className={CELL_SELECT}>
+                      <SelectTrigger
+                        size="sm"
+                        aria-label="Category"
+                        className={CELL_SELECT}
+                      >
                         <SelectValue placeholder="—" />
                       </SelectTrigger>
                       <SelectContent>
@@ -340,18 +351,17 @@ export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProp
                     </Select>
                   </TableCell>
                   <TableCell>
-                    <Select value={t.wellId} onValueChange={(v) => setWell(t.id, v ?? "")}>
-                      <SelectTrigger size="sm" aria-label="Well" className={CELL_SELECT}>
-                        <SelectValue placeholder="—" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {wells.map((w) => (
-                          <SelectItem key={w.id} value={w.id}>
-                            {w.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <input
+                      value={t.account}
+                      placeholder="—"
+                      onChange={(e) =>
+                        patchRow(t.id, { account: e.target.value })
+                      }
+                      onBlur={() => commit(t.id)}
+                      onKeyDown={handleKeyDown}
+                      className={CELL_INPUT}
+                      aria-label="Account"
+                    />
                   </TableCell>
                   <TableCell className="text-right">
                     <AmountInput
@@ -376,7 +386,7 @@ export function LedgerPanel({ transactions, wells, categories }: LedgerPanelProp
 
 /**
  * Inline amount field. Shows what's typed, normalizes on blur, and tints by
- * kind (revenue emerald / expense maroon) so the ledger reads at a glance.
+ * kind (income emerald / expense maroon) so the ledger reads at a glance.
  */
 function AmountInput({
   value,
@@ -406,13 +416,12 @@ function AmountInput({
       className={cn(
         CELL_INPUT,
         "text-right font-mono tabular-nums",
-        kind === "revenue"
+        kind === "income"
           ? "text-emerald-600 dark:text-emerald-400"
           : "text-destructive"
       )}
       onFocus={(e) => {
         focused.current = true;
-        // Show the raw number while editing (no thousands separators).
         setText(value === 0 ? "" : String(value));
         e.currentTarget.select();
       }}

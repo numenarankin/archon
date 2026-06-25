@@ -1,4 +1,5 @@
 import { anthropic } from "@ai-sdk/anthropic";
+import { after } from "next/server";
 import {
   convertToModelMessages,
   smoothStream,
@@ -6,18 +7,18 @@ import {
   streamText,
   type UIMessage,
 } from "ai";
-import { buildSystemPrompt } from "@/lib/ai/system-prompt";
+import { assembleSystemPrompt } from "@/lib/ai/system-prompt";
 import {
   buildProjectPrompt,
   renderProjectTasks,
 } from "@/lib/ai/prompts/projects";
-import { buildSkillsPrompt } from "@/lib/ai/prompts/skills";
 import { buildManifest } from "@/lib/ai/manifest";
 import { archonTools } from "@/lib/ai/tools";
 import { getFolderFiles } from "@/lib/kb/files";
 import { getTasks } from "@/lib/tasks/tasks";
 import { getProjectMemory } from "@/lib/ai/project-memory";
-import { getCustomSkills } from "@/lib/archon/skills-store";
+import { loadContextDocs } from "@/lib/ai/context/docs";
+import { latestUserText, reflectOnTurn } from "@/lib/ai/reflection";
 import { getProfile } from "@/lib/settings/profile";
 import { forbidUnlessPermitted } from "@/lib/auth/permissions";
 
@@ -42,22 +43,19 @@ export async function POST(req: Request) {
   const { messages, folderId, projectName, pageContext }: ChatRequest =
     await req.json();
 
-  // Ground the system prompt in the live data universe (well names → ids,
-  // folder tree, counts) so Archon can resolve references without a lookup, and
-  // load the team's custom skills for the skills menu.
-  const [manifest, customSkills, profile] = await Promise.all([
+  // Assemble the system prompt from Archon's editable context docs (soul, app,
+  // harness, skills menu, memory, persona), grounded in the live data universe
+  // (folder tree, counts) so it can resolve references without a lookup.
+  const [docs, manifest, profile] = await Promise.all([
+    loadContextDocs(),
     buildManifest(),
-    getCustomSkills(),
     getProfile(),
   ]);
-  let system = buildSystemPrompt(manifest, {
-    name: profile.name,
-    company: profile.companyName,
+  let system = assembleSystemPrompt({
+    docs,
+    manifest,
+    user: { name: profile.name, company: profile.companyName },
   });
-
-  // The skills menu: tells Archon the catalog of capabilities and to route each
-  // request to the right skill(s) and invoke their tools automatically.
-  system += `\n\n---\n\n${buildSkillsPrompt(customSkills)}`;
 
   // Inside a project: scope the assistant to this project's files,
   // load its curated memory, and append the project page prompt (purpose +
@@ -89,11 +87,19 @@ export async function POST(req: Request) {
       `id with read_file / describe_dataset rather than guessing.`;
   }
 
+  const userText = latestUserText(messages);
+
   const result = streamText({
     model: anthropic("claude-opus-4-8"),
     system,
     messages: await convertToModelMessages(messages),
     tools: archonTools(folderId),
+    // Self-improvement loop: once the response is done, reflect on the turn in
+    // the background (off the response path) and update memory/soul/persona only
+    // if the exchange taught something durable.
+    onFinish: ({ text }) => {
+      after(() => reflectOnTurn({ userText, assistantText: text }));
+    },
     // Autonomous multi-step retrieval, capped as a runaway/cost guard.
     stopWhen: stepCountIs(10),
     // Keep context bounded on long conversations without orphaning a tool result.

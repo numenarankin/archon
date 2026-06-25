@@ -3,69 +3,48 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getSupabaseAdmin, getSupabaseServer } from "@/lib/supabase/server";
-import { requireAdmin } from "@/lib/auth/permissions";
-import { parseCategories } from "@/lib/accounting/categories";
-import {
-  ACCOUNTING_UPLOAD_BUCKET as UPLOAD_BUCKET,
-  isOwnedStorageKey,
-} from "@/lib/accounting/storage";
-import type { DraftTransaction } from "@/lib/accounting/types";
+import { BUDGET_UPLOAD_BUCKET as UPLOAD_BUCKET } from "@/lib/budgeting/storage";
+import { requireUser } from "@/lib/auth/session";
+import type { DraftTransaction } from "@/lib/budgeting/types";
 
-/** Resolve the signed-in user's org id, or throw if there isn't one. */
-async function requireOrgId(
-  sb: Awaited<ReturnType<typeof getSupabaseServer>>
-): Promise<string> {
-  const { data: orgId, error } = await sb.rpc("current_org_id");
-  if (error || !orgId) {
-    throw new Error("No organization for the current user.");
-  }
-  return orgId as string;
+/**
+ * Budget-uploads object keys are namespaced `<owner_id>/<uuid>` so a stored
+ * object can be tied to its owner. This guards the admin-client storage ops
+ * (download/remove) against a forged key referencing another user's object —
+ * the bucket is accessed via the RLS-bypassing service role, so the prefix is
+ * the ownership signal at the points where no DB row exists yet (extract/discard).
+ */
+function isOwnedBudgetKey(key: string, ownerId: string): boolean {
+  return key.startsWith(`${ownerId}/`);
 }
 
 const draftSchema = z.object({
-  kind: z.enum(["revenue", "expense"]),
-  counterparty: z.string().trim().default(""),
+  kind: z.enum(["income", "expense"]),
+  payee: z.string().trim().default(""),
   amount: z.number().finite().nonnegative(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected an ISO date"),
   category: z.string().trim().default(""),
   categoryCode: z.string().trim().default(""),
-  invoiceNumber: z.string().trim().default(""),
-  wellId: z.string().trim().default(""),
-  volume: z.number().finite().nullable(),
-  price: z.number().finite().nullable(),
-  prodTax: z.number().finite().nullable(),
-  nri: z.number().finite().nullable(),
+  note: z.string().trim().default(""),
+  account: z.string().trim().default(""),
 });
 
-/** Maps a validated draft to a ledger row. Revenue fields are dropped for expenses. */
+/** Maps a validated draft to a ledger row. */
 function toRow(d: DraftTransaction) {
-  const isRevenue = d.kind === "revenue";
   return {
     kind: d.kind,
-    counterparty: d.counterparty,
+    payee: d.payee || null,
     amount: d.amount,
     txn_date: d.date,
-    category: d.category,
-    category_code: d.categoryCode,
-    invoice_number: d.invoiceNumber,
-    well_id: d.wellId || null,
-    volume: isRevenue ? d.volume : null,
-    price: isRevenue ? d.price : null,
-    prod_tax: isRevenue ? d.prodTax : null,
-    nri: isRevenue ? d.nri : null,
+    category: d.category || null,
+    category_code: d.categoryCode || null,
+    note: d.note || null,
+    account: d.account || null,
   };
 }
 
-function revalidate(rows: { well_id: string | null }[]): void {
-  revalidateWells(rows.map((r) => r.well_id));
-}
-
-/** Revalidate the ledger and every affected per-well accounting page. */
-function revalidateWells(wellIds: (string | null)[]): void {
-  revalidatePath("/accounting");
-  for (const wellId of new Set(wellIds)) {
-    if (wellId) revalidatePath(`/accounting/${wellId}`);
-  }
+function revalidate(): void {
+  revalidatePath("/budgeting");
 }
 
 /**
@@ -81,10 +60,10 @@ export async function createTransactions(
   const rows = parsed.map(toRow);
 
   const sb = await getSupabaseServer();
-  const { error } = await sb.from("transactions").insert(rows);
+  const { error } = await sb.from("budget_transactions").insert(rows);
   if (error) throw new Error(`createTransactions: ${error.message}`);
 
-  revalidate(rows);
+  revalidate();
   return { created: rows.length };
 }
 
@@ -101,28 +80,24 @@ const saveBatchSchema = z.object({
 
 /**
  * Mint a one-time signed upload URL so the browser can stream a (potentially
- * large) accounting file straight to private Storage, bypassing the platform's
- * serverless request-body limit that a multipart POST through a route/action
- * would hit. The returned `path` is namespaced under the caller's org so it
- * can't collide with or impersonate another org's keys; the client uploads
- * with `uploadToSignedUrl(path, token, file)`, then hands `path` back to the
- * extract route and to `saveUploadedTransactions`.
+ * large) file straight to private Storage, bypassing the platform's serverless
+ * request-body limit that a multipart POST would hit. The client uploads with
+ * `uploadToSignedUrl(path, token, file)`, then hands `path` back to the extract
+ * route and to `saveUploadedTransactions`.
  */
-export async function createAccountingUploadTarget(): Promise<{
+export async function createBudgetUploadTarget(): Promise<{
   bucket: string;
   path: string;
   token: string;
 }> {
-  const sb = await getSupabaseServer();
-  const orgId = await requireOrgId(sb);
-  const path = `${orgId}/${crypto.randomUUID()}`;
-
+  const user = await requireUser();
+  const path = `${user.id}/${crypto.randomUUID()}`;
   const { data, error } = await getSupabaseAdmin()
     .storage.from(UPLOAD_BUCKET)
     .createSignedUploadUrl(path);
   if (error || !data) {
     throw new Error(
-      `createAccountingUploadTarget: ${error?.message ?? "no signed URL"}`
+      `createBudgetUploadTarget: ${error?.message ?? "no signed URL"}`
     );
   }
   return { bucket: UPLOAD_BUCKET, path, token: data.token };
@@ -130,31 +105,26 @@ export async function createAccountingUploadTarget(): Promise<{
 
 /**
  * Best-effort delete of an uploaded-but-never-saved temp object (the user
- * closed the modal or replaced the file). Verifies org ownership so a forged
- * key can't delete another org's bytes; never throws — cleanup is advisory.
+ * closed the modal or replaced the file). Never throws — cleanup is advisory.
  */
-export async function discardAccountingUpload(storageKey: string): Promise<void> {
+export async function discardBudgetUpload(storageKey: string): Promise<void> {
   if (!storageKey) return;
   try {
-    const sb = await getSupabaseServer();
-    const orgId = await requireOrgId(sb);
-    if (!isOwnedStorageKey(storageKey, orgId)) return;
+    const user = await requireUser();
+    // Only ever remove an object under the caller's own prefix.
+    if (!isOwnedBudgetKey(storageKey, user.id)) return;
     await getSupabaseAdmin().storage.from(UPLOAD_BUCKET).remove([storageKey]);
   } catch (error) {
-    console.error("discardAccountingUpload failed", error);
+    console.error("discardBudgetUpload failed", error);
   }
 }
 
 /**
- * Saves an OCR upload batch: records an `accounting_uploads` row pointing at the
+ * Saves an OCR upload batch: records a `budget_uploads` row pointing at the
  * already-uploaded original file and inserts the reviewed transactions linked to
  * it via `upload_id`. Because that FK cascades, deleting the upload later removes
- * the whole batch. The payload (drafts + storage pointer) arrives as JSON in
- * `formData`; the file bytes are NOT sent here — they were streamed straight to
- * Storage by the browser, so this stays well under the serverless body cap.
- *
- * On partial failure the file object and upload row are cleaned up so a retry
- * starts clean (no orphaned batch).
+ * the whole batch. On partial failure the file object and upload row are cleaned
+ * up so a retry starts clean.
  */
 export async function saveUploadedTransactions(
   formData: FormData
@@ -174,23 +144,21 @@ export async function saveUploadedTransactions(
     saveBatchSchema.parse(payload);
   if (drafts.length === 0) return { created: 0 };
 
+  // A client-supplied storageKey must live under the caller's own prefix, so the
+  // admin-client rollback removes below can never touch another user's object.
+  const user = await requireUser();
+  if (storageKey && !isOwnedBudgetKey(storageKey, user.id)) {
+    throw new Error("saveUploadedTransactions: storage key not owned by caller");
+  }
+
   const rows = drafts.map(toRow);
   const totalAmount = rows.reduce((sum, r) => sum + r.amount, 0);
 
   const sb = await getSupabaseServer();
 
-  // 1. The original file is already in Storage (uploaded direct-to-bucket).
-  // Verify the key belongs to this org before linking it to the batch.
-  if (storageKey) {
-    const orgId = await requireOrgId(sb);
-    if (!isOwnedStorageKey(storageKey, orgId)) {
-      throw new Error("saveUploadedTransactions: storage key is not owned");
-    }
-  }
-
-  // 2. Record the upload batch (org_id defaults to current_org_id() via RLS).
+  // Record the upload batch.
   const { data: upload, error: upErr } = await sb
-    .from("accounting_uploads")
+    .from("budget_uploads")
     .insert({
       file_name: fileName,
       mime,
@@ -205,54 +173,48 @@ export async function saveUploadedTransactions(
     if (storageKey) {
       await getSupabaseAdmin().storage.from(UPLOAD_BUCKET).remove([storageKey]);
     }
-    throw new Error(`saveUploadedTransactions (upload): ${upErr?.message ?? "insert failed"}`);
+    throw new Error(
+      `saveUploadedTransactions (upload): ${upErr?.message ?? "insert failed"}`
+    );
   }
 
-  // 3. Insert the transactions linked to the batch.
+  // Insert the transactions linked to the batch.
   const uploadId = (upload as { id: string }).id;
   const { error: txErr } = await sb
-    .from("transactions")
+    .from("budget_transactions")
     .insert(rows.map((r) => ({ ...r, upload_id: uploadId })));
   if (txErr) {
     // Roll the batch back: drop the upload row (cascade — no txns yet) + file.
-    await sb.from("accounting_uploads").delete().eq("id", uploadId);
+    await sb.from("budget_uploads").delete().eq("id", uploadId);
     if (storageKey) {
       await getSupabaseAdmin().storage.from(UPLOAD_BUCKET).remove([storageKey]);
     }
     throw new Error(`saveUploadedTransactions (transactions): ${txErr.message}`);
   }
 
-  revalidate(rows);
+  revalidate();
   return { created: rows.length };
 }
 
 /**
- * Deletes an upload batch: removes the `accounting_uploads` row (which cascades
- * to every transaction created from it) and the stored file. This is the
- * one-step "undo" for a file upload.
+ * Deletes an upload batch: removes the `budget_uploads` row (which cascades to
+ * every transaction created from it) and the stored file. The one-step "undo"
+ * for a file upload.
  */
 export async function deleteUpload(uploadId: string): Promise<void> {
   z.string().uuid().parse(uploadId);
   const sb = await getSupabaseServer();
 
-  // Read the storage key + the batch's wells (for revalidation) before deleting.
   const { data: upload, error: readErr } = await sb
-    .from("accounting_uploads")
+    .from("budget_uploads")
     .select("storage_key")
     .eq("id", uploadId)
     .maybeSingle();
   if (readErr) throw new Error(`deleteUpload (read): ${readErr.message}`);
   if (!upload) return;
 
-  const { data: txns } = await sb
-    .from("transactions")
-    .select("well_id")
-    .eq("upload_id", uploadId);
-  const wellIds = (txns ?? []).map((t) => (t as { well_id: string | null }).well_id);
-
-  // Delete the batch — transactions go with it via ON DELETE CASCADE.
   const { error: delErr } = await sb
-    .from("accounting_uploads")
+    .from("budget_uploads")
     .delete()
     .eq("id", uploadId);
   if (delErr) throw new Error(`deleteUpload: ${delErr.message}`);
@@ -262,13 +224,10 @@ export async function deleteUpload(uploadId: string): Promise<void> {
     await getSupabaseAdmin().storage.from(UPLOAD_BUCKET).remove([storageKey]);
   }
 
-  revalidateWells(wellIds);
+  revalidate();
 }
 
-/**
- * Updates a single transaction in place (Ledger click-to-edit). Revalidates the
- * ledger plus both the old and new well pages, in case the well changed.
- */
+/** Updates a single transaction in place (Ledger click-to-edit). */
 export async function updateTransaction(
   id: string,
   draft: DraftTransaction
@@ -278,18 +237,13 @@ export async function updateTransaction(
   const row = toRow(parsed);
 
   const sb = await getSupabaseServer();
-
-  // The previous well, so its page revalidates if the transaction moves wells.
-  const { data: prev } = await sb
-    .from("transactions")
-    .select("well_id")
-    .eq("id", id)
-    .maybeSingle();
-
-  const { error } = await sb.from("transactions").update(row).eq("id", id);
+  const { error } = await sb
+    .from("budget_transactions")
+    .update(row)
+    .eq("id", id);
   if (error) throw new Error(`updateTransaction: ${error.message}`);
 
-  revalidateWells([row.well_id, (prev as { well_id: string | null } | null)?.well_id ?? null]);
+  revalidate();
 }
 
 /** Permanently deletes the given transactions (Ledger multi-select). */
@@ -298,48 +252,11 @@ export async function deleteTransactions(ids: string[]): Promise<void> {
   if (parsed.length === 0) return;
 
   const sb = await getSupabaseServer();
-
-  // Capture affected wells before deletion so their pages revalidate.
-  const { data: txns } = await sb
-    .from("transactions")
-    .select("well_id")
+  const { error } = await sb
+    .from("budget_transactions")
+    .delete()
     .in("id", parsed);
-  const wellIds = (txns ?? []).map((t) => (t as { well_id: string | null }).well_id);
-
-  const { error } = await sb.from("transactions").delete().in("id", parsed);
   if (error) throw new Error(`deleteTransactions: ${error.message}`);
 
-  revalidateWells(wellIds);
-}
-
-/**
- * Saves the org's chart of accounts (Settings → Accounting). Validates the JSON
- * text and writes the normalized array to the organization row (owner-gated by
- * RLS). Returns a field error instead of throwing on malformed input.
- */
-export async function saveAccountingCategories(
-  text: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  // Category config is an org setting — admin only.
-  await requireAdmin();
-  const parsed = parseCategories(text);
-  if (!parsed.ok) return parsed;
-
-  const sb = await getSupabaseServer();
-  const { data: org, error: readError } = await sb
-    .from("organizations")
-    .select("id")
-    .maybeSingle();
-  if (readError) throw new Error(`saveAccountingCategories: ${readError.message}`);
-  if (!org) return { ok: false, error: "No organization found." };
-
-  const { error } = await sb
-    .from("organizations")
-    .update({ accounting_categories: parsed.categories })
-    .eq("id", org.id);
-  if (error) throw new Error(`saveAccountingCategories: ${error.message}`);
-
-  revalidatePath("/settings");
-  revalidatePath("/accounting");
-  return { ok: true };
+  revalidate();
 }
