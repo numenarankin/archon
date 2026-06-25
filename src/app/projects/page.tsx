@@ -4,7 +4,7 @@ import { NewProjectButton } from "@/components/projects/new-project-button";
 import { requirePermission } from "@/lib/auth/permissions";
 
 export default async function ProjectsPage() {
-  await requirePermission("manage_projects");
+  await requirePermission("view_projects");
   const folders = await getProjectFolders();
 
   return (

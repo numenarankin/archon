@@ -7,7 +7,7 @@ import {
 import { SalesWorkspace } from "@/components/wildcat/sales/sales-workspace";
 
 export default async function SalesPage() {
-  await requirePermission("view_prospects");
+  await requirePermission("view_sales");
   const [prospects, history, config] = await Promise.all([
     getQueue(),
     getCallHistory(),

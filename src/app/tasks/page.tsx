@@ -3,7 +3,7 @@ import { TasksBoard } from "@/components/tasks/tasks-board";
 import { requirePermission } from "@/lib/auth/permissions";
 
 export default async function TasksPage() {
-  await requirePermission("manage_tasks");
+  await requirePermission("view_tasks");
   const [tasks, team] = await Promise.all([getTasks(), getAssignees()]);
 
   // Assignable people: the current user plus every workspace member, de-duped.

@@ -8,7 +8,7 @@ import type { InterestOwner } from "@/lib/accounting/derive";
 import { requirePermission } from "@/lib/auth/permissions";
 
 export default async function AccountingPage() {
-  await requirePermission(["view_accounting", "manage_accounting"]);
+  await requirePermission("view_accounting");
   const [transactions, wells, royaltyOwners, categories, uploads] =
     await Promise.all([
       getTransactions(),

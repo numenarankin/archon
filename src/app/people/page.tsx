@@ -8,7 +8,7 @@ import { PeopleWorkspace } from "@/components/people/people-workspace";
 import { requirePermission } from "@/lib/auth/permissions";
 
 export default async function PeoplePage() {
-  await requirePermission(["view_royalty_owners", "manage_royalty_owners"]);
+  await requirePermission("view_people");
   const [contractors, serviceProviders, royaltyOwners, wellNameById] =
     await Promise.all([
       getContractors(),

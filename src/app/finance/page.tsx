@@ -9,7 +9,7 @@ import {
 import { requirePermission } from "@/lib/auth/permissions";
 
 export default async function FinancePage() {
-  await requirePermission("view_accounting");
+  await requirePermission("view_finance");
   const {
     accounts,
     totalAvailable,

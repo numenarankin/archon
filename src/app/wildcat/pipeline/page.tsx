@@ -3,7 +3,7 @@ import { PipelineBoard } from "@/components/numena/pipeline-board";
 import { requirePermission } from "@/lib/auth/permissions";
 
 export default async function PipelinePage() {
-  await requirePermission("view_prospects");
+  await requirePermission("view_pipeline");
   const deals = await getDeals();
 
   return <PipelineBoard deals={deals} />;

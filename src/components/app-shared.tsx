@@ -47,21 +47,19 @@ export const navGroups: SidebarNavGroup[] = [
 				title: "Home",
 				path: "/",
 				icon: <HomeIcon />,
-				// The home page is the Archon chat overview, so it's only useful
-				// (and only reachable — see app/page.tsx) with `use_ai`.
 				permission: "use_ai",
 			},
 			{
 				title: "Files",
 				path: "/files",
 				icon: <FilesIcon />,
-				permission: "manage_files",
+				permission: "view_files",
 			},
 			{
-				// No dedicated permission yet — visible to everyone, like Settings.
 				title: "Email",
 				path: "/email",
 				icon: <MailIcon />,
+				permission: "view_email",
 			},
 			{
 				title: "Archon",
@@ -73,19 +71,19 @@ export const navGroups: SidebarNavGroup[] = [
 				title: "Tasks",
 				path: "/tasks",
 				icon: <ListTodoIcon />,
-				permission: "manage_tasks",
+				permission: "view_tasks",
 			},
 			{
 				title: "Calendar",
 				path: "/calendar",
 				icon: <CalendarIcon />,
-				permission: ["manage_personal_calendar", "manage_org_calendar"],
+				permission: "view_calendar",
 			},
 			{
 				title: "Projects",
 				path: "/projects",
 				icon: <CompassIcon />,
-				permission: "manage_projects",
+				permission: "view_projects",
 			},
 		],
 	},
@@ -93,27 +91,28 @@ export const navGroups: SidebarNavGroup[] = [
 		label: "Numena",
 		items: [
 			{
-				// No dedicated permission yet — visible to everyone, like Email.
 				title: "Prospecting",
 				path: "/numena",
 				icon: <GemIcon />,
+				permission: "view_prospects",
 			},
 			{
 				title: "Pipeline",
 				path: "/numena/pipeline",
 				icon: <KanbanIcon />,
+				permission: "view_pipeline",
 			},
 			{
 				title: "KPIs",
 				path: "/numena-kpis",
 				icon: <LineChartIcon />,
+				permission: "view_kpis",
 			},
 			{
-				// Mercury bank dashboard. No dedicated permission — visible to
-				// everyone, like Email; gated only by the MERCURY_API_KEY env.
 				title: "Finance",
 				path: "/finance",
 				icon: <LandmarkIcon />,
+				permission: "view_finance",
 			},
 		],
 	},
@@ -124,29 +123,31 @@ export const navGroups: SidebarNavGroup[] = [
 				title: "Pipeline",
 				path: "/wildcat/pipeline",
 				icon: <KanbanIcon />,
+				permission: "view_pipeline",
 			},
 			{
 				title: "Sales",
 				path: "/wildcat/sales",
 				icon: <HandshakeIcon />,
+				permission: "view_sales",
 			},
 			{
 				title: "Map",
 				path: "/map",
 				icon: <MapIcon />,
-				permission: "view_well_files",
+				permission: "view_map",
 			},
 			{
 				title: "People",
 				path: "/people",
 				icon: <UsersIcon />,
-				permission: ["view_royalty_owners", "manage_royalty_owners"],
+				permission: "view_people",
 			},
 			{
 				title: "Accounting",
 				path: "/accounting",
 				icon: <CalculatorIcon />,
-				permission: ["view_accounting", "manage_accounting"],
+				permission: "view_accounting",
 			},
 			{
 				title: "Analytics",
@@ -160,11 +161,10 @@ export const navGroups: SidebarNavGroup[] = [
 		label: "Personal",
 		items: [
 			{
-				// No dedicated permission — personal budgeting is visible to
-				// everyone, like Email.
 				title: "Budgeting",
 				path: "/budgeting",
 				icon: <WalletIcon />,
+				permission: "view_budgeting",
 			},
 		],
 	},

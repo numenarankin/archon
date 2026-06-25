@@ -38,9 +38,17 @@ export function hasElevenLabs(): boolean {
 
 /** The public base URL, used to build member-invite links (see invite-email). */
 export function getAppUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_APP_URL ??
-    process.env.APP_URL ??
-    "http://localhost:3000"
-  );
+  // Explicit override wins (set NEXT_PUBLIC_APP_URL to a custom domain).
+  const explicit = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL;
+  if (explicit?.trim()) return explicit.trim().replace(/\/+$/, "");
+
+  // On Vercel, derive the public origin automatically so invite/email links
+  // point at the real deployment instead of localhost. VERCEL_PROJECT_PRODUCTION_URL
+  // is the stable production domain; VERCEL_URL is the per-deployment URL. Neither
+  // carries a protocol, so prefix https.
+  const vercelHost =
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+  if (vercelHost?.trim()) return `https://${vercelHost.trim().replace(/\/+$/, "")}`;
+
+  return "http://localhost:3000";
 }

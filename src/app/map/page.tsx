@@ -1,4 +1,5 @@
 import { WellsMap } from "@/components/map/wells-map";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export const metadata = {
   title: "Well Map",
@@ -6,6 +7,7 @@ export const metadata = {
 };
 
 // The map fills the full-bleed content area (see app-main.tsx).
-export default function MapPage() {
+export default async function MapPage() {
+  await requirePermission("view_map");
   return <WellsMap />;
 }

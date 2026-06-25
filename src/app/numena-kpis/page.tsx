@@ -23,7 +23,7 @@ const OFFERING_STAGE_META: Record<string, { label: string; color: string }> = {
 };
 
 export default async function NumenaKpisPage() {
-  await requirePermission("view_prospects");
+  await requirePermission("view_kpis");
   const data = await getKpiDashboard();
 
   return (

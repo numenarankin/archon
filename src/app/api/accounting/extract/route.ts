@@ -139,8 +139,8 @@ export async function POST(req: Request) {
   // `res.json()` then fails with "Unexpected token '<', "<!DOCTYPE"...".
   try {
     // Capability gate: document extraction writes accounting drafts, so it
-    // requires `manage_accounting` — enforced here, not just on the page.
-    const denied = await forbidUnlessPermitted("manage_accounting");
+    // requires the Accounting page — enforced here, not just on the page route.
+    const denied = await forbidUnlessPermitted("view_accounting");
     if (denied) return denied;
 
     const sb = await getSupabaseServer();
