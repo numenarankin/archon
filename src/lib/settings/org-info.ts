@@ -1,33 +1,28 @@
 /**
- * Server-only read access to the caller's organization row (the org they own or
- * are an active member of, resolved by RLS via `current_org_id()`). Kept apart
- * from `./org` (pure types) so client bundles don't drag in the server client.
+ * Server-only read access to the caller's workspace (the one they own or are a
+ * member of). Kept apart from `./org` (pure types) so client bundles don't drag
+ * in the server client.
  */
 
 import { hasSupabase } from "@/lib/env";
-import { getSupabaseAdmin, getSupabaseServer } from "@/lib/supabase/server";
+import { getSupabaseServer } from "@/lib/supabase/server";
 import { describeError, isAbsentRelation } from "@/lib/supabase/errors";
-import { uniqueReferralCode } from "@/lib/auth/referral";
 
 export interface OrgInfo {
   id: string;
   name: string;
-  referralCode: string | null;
   companyAddress: string | null;
   employeeCount: number | null;
   wellCount: number | null;
-  recommendedTier: string | null;
   onboardingCompleted: boolean;
 }
 
 interface OrgRow {
   id: string;
   name: string | null;
-  referral_code: string | null;
   company_address: string | null;
   employee_count: number | null;
   well_count: number | null;
-  recommended_tier: string | null;
   onboarding_completed_at: string | null;
 }
 
@@ -35,68 +30,30 @@ function mapOrg(r: OrgRow): OrgInfo {
   return {
     id: r.id,
     name: r.name ?? "",
-    referralCode: r.referral_code,
     companyAddress: r.company_address,
     employeeCount: r.employee_count,
     wellCount: r.well_count,
-    recommendedTier: r.recommended_tier,
     onboardingCompleted: r.onboarding_completed_at !== null,
   };
 }
 
 /**
- * The caller's org referral code, generating + persisting one if the row has
- * none yet (older orgs predate auto-generation at sign-up). Uses the admin
- * client because writing `organizations` is owner-only under RLS and the read
- * needs to see the freshly written value. Returns null only when billing isn't
- * configured or the org can't be resolved.
+ * The caller's primary workspace, or null when unavailable. RLS scopes the
+ * select to workspaces the caller belongs to; we take their default (primary)
+ * one.
  */
-export async function ensureReferralCode(): Promise<string | null> {
-  if (!hasSupabase()) return null;
-  try {
-    const sb = await getSupabaseServer();
-    const { data: orgId, error: orgErr } = await sb.rpc("current_org_id");
-    if (orgErr || !orgId) return null;
-
-    const admin = getSupabaseAdmin();
-    const { data: org } = await admin
-      .from("organizations")
-      .select("referral_code")
-      .eq("id", orgId)
-      .maybeSingle<{ referral_code: string | null }>();
-    if (org?.referral_code) return org.referral_code;
-
-    const code = await uniqueReferralCode(admin);
-    const { error: updErr } = await admin
-      .from("organizations")
-      .update({ referral_code: code })
-      .eq("id", orgId);
-    if (updErr) {
-      if (!isAbsentRelation(updErr)) {
-        console.warn("ensureReferralCode update failed:", updErr.message);
-      }
-      return null;
-    }
-    return code;
-  } catch (error) {
-    // No `organizations` table in this single-tenant app: expected, stay quiet.
-    if (!isAbsentRelation(error)) {
-      console.warn("ensureReferralCode unavailable:", describeError(error));
-    }
-    return null;
-  }
-}
-
-/** The caller's org, or null when unavailable (unconfigured / no membership). */
 export async function getOrgInfo(): Promise<OrgInfo | null> {
   if (!hasSupabase()) return null;
   try {
     const sb = await getSupabaseServer();
+    const { data: workspaceId } = await sb.rpc("app_default_workspace_id");
+    if (!workspaceId) return null;
     const { data, error } = await sb
-      .from("organizations")
+      .from("workspaces")
       .select(
-        "id, name, referral_code, company_address, employee_count, well_count, recommended_tier, onboarding_completed_at"
+        "id, name, company_address, employee_count, well_count, onboarding_completed_at"
       )
+      .eq("id", workspaceId)
       .maybeSingle();
     if (error) throw error;
     return data ? mapOrg(data as OrgRow) : null;

@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
 import { getSupabaseServer } from "@/lib/supabase/server";
-import { recommendTier } from "@/lib/billing/tiers";
 
 export interface OnboardingInput {
   companyName: string;
@@ -13,19 +12,17 @@ export interface OnboardingInput {
 }
 
 export interface OnboardingResult {
-  recommendedTier: string;
   wellCount: number;
 }
 
 /**
- * Step 1 of admin onboarding: persist company details + counts and the tier
- * recommended from the well count. This does NOT mark onboarding complete; the
- * owner still has to select a plan and add a card. Completion is stamped later
- * by `finalizeOnboarding`, and the proxy keeps owners on /onboarding until then.
+ * Step 1 of owner onboarding: persist company details + counts on the owner's
+ * workspace. Does NOT mark onboarding complete — `finalizeOnboarding` stamps
+ * that, and the proxy keeps owners on /onboarding until then.
  *
- * Writes go through the request-scoped client, so the org's `is_org_owner` write
- * policy enforces that only the owner can do this. The filter on `owner_uid` is
- * belt-and-braces on top of that RLS policy.
+ * Writes go through the request-scoped client; the workspace admin-only RLS
+ * write policy enforces that only an owner/admin can do this, and the
+ * `owner_uid` filter targets the caller's own workspace.
  */
 export async function saveOnboardingDetails(
   input: OnboardingInput
@@ -43,39 +40,35 @@ export async function saveOnboardingDetails(
     throw new Error("Enter the number of wells (at least 1).");
   }
 
-  const tier = recommendTier(wellCount);
   const sb = await getSupabaseServer();
 
   const { error } = await sb
-    .from("organizations")
+    .from("workspaces")
     .update({
       name: companyName,
       company_address: companyAddress,
       employee_count: employeeCount,
       well_count: wellCount,
-      recommended_tier: tier.key,
     })
     .eq("owner_uid", user.id);
   if (error) throw new Error(`saveOnboardingDetails: ${error.message}`);
 
   revalidatePath("/", "layout");
 
-  return { recommendedTier: tier.key, wellCount };
+  return { wellCount };
 }
 
 /**
- * Final step of admin onboarding: stamp `onboarding_completed_at`, which lifts
- * the proxy's onboarding gate and lets the owner into the app. Called once the
- * owner has subscribed + added a card, or, when billing isn't configured or the
- * recommended plan is contact-sales (no self-serve price), once they choose to
- * continue. Idempotent: the `is null` filter makes a repeat call a no-op.
+ * Final step of owner onboarding: stamp `onboarding_completed_at`, which lifts
+ * the proxy's onboarding gate and lets the owner into the app. Idempotent: the
+ * `is null` filter makes a repeat call a no-op.
  */
 export async function finalizeOnboarding(): Promise<{ ok: true }> {
   const user = await requireUser();
   const sb = await getSupabaseServer();
 
   const { error } = await sb
-    .from("organizations")
+    .from("workspaces")
     .update({ onboarding_completed_at: new Date().toISOString() })
     .eq("owner_uid", user.id)
     .is("onboarding_completed_at", null);

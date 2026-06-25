@@ -7,7 +7,6 @@ import { getOrCreateWellFolderId } from "@/lib/wells/well-folder";
 import { DEFAULT_EQUIPMENT_LABELS } from "@/lib/wells/equipment-fields";
 import { getSessionUser } from "@/lib/auth/session";
 import { getProfile } from "@/lib/settings/profile";
-import { assertWellCapacity } from "@/lib/billing/subscription";
 import type {
   EquipmentField,
   ProductionPoint,
@@ -71,9 +70,6 @@ function toRow(input: WellInput) {
 /** Create a well with a unique slug id; returns the new id. */
 export async function createWell(input: WellInput): Promise<{ id: string }> {
   const sb = await getSupabaseServer();
-
-  // Enforce the subscription's well cap before creating (throws on overage).
-  await assertWellCapacity(sb);
 
   const base = slugify(input.name);
   const { data: existing, error: lookupError } = await sb

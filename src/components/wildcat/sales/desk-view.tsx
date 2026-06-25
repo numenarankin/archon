@@ -16,17 +16,21 @@ import { LineupRail } from "@/components/wildcat/sales/lineup-rail";
 import { CallCard } from "@/components/wildcat/sales/call-card";
 import { TranscriptPanel } from "@/components/wildcat/sales/transcript-panel";
 import {
+  renderTemplate,
   WEEKDAYS,
   type CallStatus,
   type Prospect,
+  type SalesConfig,
   type WeekdayKey,
 } from "@/lib/wildcat/sales";
 
 export function DeskView({
   prospects,
+  config,
   onChange,
 }: {
   prospects: Prospect[];
+  config: SalesConfig;
   onChange: Dispatch<SetStateAction<Prospect[]>>;
 }) {
   const [day, setDay] = useState<WeekdayKey>("mon");
@@ -141,6 +145,9 @@ export function DeskView({
             />
             <CallCard
               prospect={current}
+              script={renderTemplate(config.openingScript, current)}
+              objections={config.objections}
+              followUps={config.followUps}
               onStatusChange={handleStatusChange}
               onLogNext={() => goTo(currentIndex + 1)}
             />

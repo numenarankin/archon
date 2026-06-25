@@ -4,7 +4,6 @@ import { z } from "zod";
 import * as XLSX from "xlsx";
 import { getSupabaseAdmin, getSupabaseServer } from "@/lib/supabase/server";
 import { forbidUnlessPermitted } from "@/lib/auth/permissions";
-import { gateAI, meterAnthropic } from "@/lib/billing/credits";
 import { getBudgetCategories, type Category } from "@/lib/budgeting/categories";
 import { BUDGET_UPLOAD_BUCKET } from "@/lib/budgeting/storage";
 
@@ -102,13 +101,6 @@ export async function POST(req: Request) {
     if (denied) return denied;
 
     const sb = await getSupabaseServer();
-    const gate = await gateAI(sb);
-    if (!gate.allowed) {
-      return Response.json(
-        { error: "ai_unavailable", reason: gate.reason },
-        { status: 402 }
-      );
-    }
 
     // The file was streamed straight to private Storage by the browser; we
     // receive only a reference.
@@ -177,12 +169,6 @@ export async function POST(req: Request) {
         },
       ],
     });
-
-    void meterAnthropic(
-      { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens },
-      "budget:extract",
-      sb
-    );
 
     return Response.json({ transactions: object.transactions });
   } catch (error) {

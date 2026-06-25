@@ -1,21 +1,32 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react";
+import {
+  CheckCheckIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
+} from "lucide-react";
 import type { TranscriptLine } from "@/lib/wildcat/sales";
 
 /**
- * Live call transcript on the right of the desk. Collapses to a thin rail so
- * the rep can reclaim the width when they'd rather just read the card.
+ * Call transcript on the right of the desk. Collapses to a thin rail so the rep
+ * can reclaim the width. `live` toggles the in-progress chrome (recording dot,
+ * running timer, typing indicator) vs. the static record of a finished call.
  */
 export function TranscriptPanel({
   lines,
   open,
   onToggle,
+  live = true,
+  duration,
 }: {
   lines: TranscriptLine[];
   open: boolean;
   onToggle: () => void;
+  /** True during an active call; false for a saved transcript in history. */
+  live?: boolean;
+  /** Final call length, shown in place of the running timer when not live. */
+  duration?: string;
 }) {
   if (!open) {
     return (
@@ -31,7 +42,11 @@ export function TranscriptPanel({
         <span className="text-[11px] font-medium tracking-wide text-muted-foreground [writing-mode:vertical-rl]">
           Transcript
         </span>
-        <span className="size-1.5 animate-pulse rounded-full bg-rose-500" />
+        {live ? (
+          <span className="size-1.5 animate-pulse rounded-full bg-rose-500" />
+        ) : (
+          <CheckCheckIcon className="size-3.5 text-muted-foreground/60" />
+        )}
       </div>
     );
   }
@@ -39,11 +54,27 @@ export function TranscriptPanel({
   return (
     <div className="flex w-80 shrink-0 flex-col overflow-hidden rounded-xl border bg-card">
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2.5">
-        <span className="size-1.5 animate-pulse rounded-full bg-rose-500" />
-        <span className="text-xs font-semibold tracking-wide text-foreground uppercase">
-          Live transcript
-        </span>
-        <span className="text-[11px] tabular-nums text-muted-foreground">01:24</span>
+        {live ? (
+          <>
+            <span className="size-1.5 animate-pulse rounded-full bg-rose-500" />
+            <span className="text-xs font-semibold tracking-wide text-foreground uppercase">
+              Live transcript
+            </span>
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              01:24
+            </span>
+          </>
+        ) : (
+          <>
+            <CheckCheckIcon className="size-3.5 text-muted-foreground" />
+            <span className="text-xs font-semibold tracking-wide text-foreground uppercase">
+              Transcript
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              Completed{duration ? ` · ${duration}` : ""}
+            </span>
+          </>
+        )}
         <button
           type="button"
           onClick={onToggle}
@@ -71,11 +102,13 @@ export function TranscriptPanel({
             {line.text}
           </div>
         ))}
-        <div className="flex items-center gap-1 self-start px-1 pt-1">
-          <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:-0.2s]" />
-          <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:-0.1s]" />
-          <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/40" />
-        </div>
+        {live && (
+          <div className="flex items-center gap-1 self-start px-1 pt-1">
+            <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:-0.2s]" />
+            <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/40 [animation-delay:-0.1s]" />
+            <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/40" />
+          </div>
+        )}
       </div>
     </div>
   );

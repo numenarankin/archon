@@ -270,6 +270,39 @@ TODO if those are revived: re-express the accounting extract route's `current_or
 ownership guard in the workspace model, and namespace `wells/actions.ts` upload keys
 (left bare; still safe because file access is mediated by the RLS-scoped row lookup).
 
+## Follow-on (2026-06-25): invites, onboarding, billing/referral removal
+
+DONE:
+- Migration `…000900_invites_onboarding` — `workspace_invites` table + onboarding
+  columns on `workspaces` (owner_uid, company_address, employee_count, well_count,
+  onboarding_completed_at) + `name/email/permissions` on `workspace_members`.
+  Founder workspace backfilled as already-onboarded.
+- Invite flow ported from wildcat-webapp onto workspaces: `inviteMember` /
+  `resendInvite` / `cancelInvite` / `removeMember` / `setMemberPermissions`
+  (settings/actions), `getOrgMembers` roster merges active members + pending
+  invites, `lookupInvite` + `/api/auth/accept-invite` create the auth account and
+  add a `workspace_members` row to the inviting workspace, seeding the new user's
+  agent context. Email via Brevo (`BREVO_*` added to `.env.local`).
+- Onboarding refactored: two-step (details → invite), writes to `workspaces`;
+  proxy gate sends incomplete OWNERS to `/onboarding` and naturally skips invited
+  members (they own no workspace). New owners auto-provision via `ensureWorkspace`.
+- `permissions.ts` now resolves real role/permission from `workspace_members`
+  (owner/admin = full; member = granted set). `requireAdmin` enforces it.
+- Billing + referral REMOVED: deleted `lib/billing/`, `app/api/billing/`,
+  `lib/auth/referral.ts`, AI-credit gates/meters in 5 routes, the well-cap check,
+  Stripe env helpers, and all referral UI. Dead `lib/auth/membership.ts` deleted.
+- Typecheck: zero source errors.
+
+STILL BROKEN (pre-existing dead-schema, separate decision): accounting ledger
+(`lib/accounting/*`, `app/api/accounting/extract` — `transactions` table +
+`current_org_id()`). Not touched beyond removing its billing gate.
+
+INVITE TEST CHECKLIST (after running migrations):
+1. `auth.users` has rankin@wildcatiq.ai; run migrations `20260625000100`–`000900`.
+2. Settings → Organization → invite an email → Brevo sends `localhost:3000/invite/<token>`.
+3. Open the link → set password → lands in the founder's workspace as a member
+   (sees org-shared files/tasks, NOT the founder's private chats/memory/budget).
+
 ## Risks
 - **RLS recursion** on membership policies — mitigated by `security definer` helpers.
 - **Backfill correctness** — rows with NULL owner after backfill would become

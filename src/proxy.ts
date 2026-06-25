@@ -18,12 +18,24 @@ import { getSupabaseUrl } from "@/lib/env";
 // well-position vector tiles (coordinates only) for the map; keeping it public
 // avoids any cookie dependency for Mapbox tile requests. The /map page itself
 // stays auth-gated.
-const PUBLIC_PATHS = ["/auth", "/api/tiles", "/operators.json"];
+const PUBLIC_PATHS = [
+  "/auth",
+  "/invite",
+  "/api/auth/accept-invite",
+  "/api/tiles",
+  "/operators.json",
+];
+
+// Pages an authenticated-but-not-yet-onboarded owner may still reach. Everything
+// else bounces to /onboarding until they finish.
+const ONBOARDING_EXEMPT = ["/auth", "/onboarding", "/invite"];
+
+function matchesPath(pathname: string, paths: string[]): boolean {
+  return paths.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
 
 function isPublic(pathname: string): boolean {
-  return PUBLIC_PATHS.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`)
-  );
+  return matchesPath(pathname, PUBLIC_PATHS);
 }
 
 export async function proxy(request: NextRequest) {
@@ -71,6 +83,29 @@ export async function proxy(request: NextRequest) {
       redirectUrl.searchParams.set("next", pathname + request.nextUrl.search);
     }
     return NextResponse.redirect(redirectUrl);
+  }
+
+  // Onboarding gate: a signed-in user who OWNS a workspace that hasn't finished
+  // onboarding is held on /onboarding. Keyed on ownership, so invited members
+  // (who own no workspace) are never gated. GET-only and non-API so it can't trap
+  // form posts or asset fetches.
+  if (
+    user &&
+    request.method === "GET" &&
+    !pathname.startsWith("/api/") &&
+    !matchesPath(pathname, ONBOARDING_EXEMPT)
+  ) {
+    const { data: ownedWorkspace } = await supabase
+      .from("workspaces")
+      .select("onboarding_completed_at")
+      .eq("owner_uid", user.id)
+      .maybeSingle<{ onboarding_completed_at: string | null }>();
+    if (ownedWorkspace && ownedWorkspace.onboarding_completed_at === null) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/onboarding";
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
   }
 
   return response;

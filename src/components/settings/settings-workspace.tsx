@@ -34,17 +34,14 @@ function isSection(value: string | undefined): value is Section {
 export function SettingsWorkspace({
   profile,
   members,
-  referralCode,
   companyAddress,
   googleSettings,
   customSkills,
   contextDocs,
   initialSection,
-  appUrl,
 }: {
   profile: Profile;
   members: OrgMember[];
-  referralCode: string | null;
   companyAddress: string | null;
   /** Redacted Google Workspace integration settings for the Integrations tab. */
   googleSettings: GoogleWorkspaceSettingsView;
@@ -54,8 +51,6 @@ export function SettingsWorkspace({
   contextDocs: ContextDoc[];
   /** Tab to open initially (e.g. from a ?section= link). */
   initialSection?: string;
-  /** Public base URL (server-resolved) for the referral link. */
-  appUrl: string;
 }) {
   // Org settings (every tab but Profile) are admin-only; non-admins see only
   // their own profile. This mirrors the server-side requireAdmin guards on the
@@ -92,13 +87,7 @@ export function SettingsWorkspace({
       {/* px/pt give card borders, shadows, and focus rings room so the scroll
           container (overflow-y also clips x) doesn't shear their edges. */}
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pt-1 pb-2">
-        {section === "profile" && (
-          <ProfileSection
-            profile={profile}
-            referralCode={referralCode}
-            appUrl={appUrl}
-          />
-        )}
+        {section === "profile" && <ProfileSection profile={profile} />}
         {isAdmin && section === "organization" && (
           <OrganizationSection
             profile={profile}

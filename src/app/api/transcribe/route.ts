@@ -1,7 +1,6 @@
 import { hasElevenLabs } from "@/lib/env";
 import { transcribeAudio } from "@/lib/ai/tts";
 import { forbidUnlessPermitted } from "@/lib/auth/permissions";
-import { gateAI, meterElevenLabsStt } from "@/lib/billing/credits";
 
 // Transcription of a short utterance is quick, but give it headroom.
 export const maxDuration = 60;
@@ -16,14 +15,6 @@ export async function POST(req: Request) {
     return new Response("ELEVEN_LABS_KEY not configured", { status: 503 });
   }
 
-  const gate = await gateAI();
-  if (!gate.allowed) {
-    return Response.json(
-      { error: "ai_unavailable", reason: gate.reason },
-      { status: 402 }
-    );
-  }
-
   const buf = await req.arrayBuffer();
   if (buf.byteLength === 0) {
     return new Response("Empty audio body", { status: 400 });
@@ -32,7 +23,6 @@ export async function POST(req: Request) {
   const contentType = req.headers.get("content-type") || "audio/webm";
   try {
     const text = await transcribeAudio(buf, contentType);
-    void meterElevenLabsStt("transcribe");
     return Response.json({ text });
   } catch (error) {
     const message =

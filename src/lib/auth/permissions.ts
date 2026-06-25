@@ -13,8 +13,11 @@
 import { redirect } from "next/navigation";
 import { hasSupabase } from "@/lib/env";
 import { getSessionUser } from "@/lib/auth/session";
+import { getSupabaseServer } from "@/lib/supabase/server";
 import {
   ALL_PERMISSION_KEYS,
+  cleanPermissions,
+  expandPermissions,
   type PermissionKey,
 } from "@/lib/settings/org";
 
@@ -25,12 +28,11 @@ export interface CurrentPermissions {
 }
 
 /**
- * Resolve the current user's effective permissions.
- *
- * Single-tenant model: there are no orgs or memberships — sign-up is just an
- * email + password. So any authenticated account gets full access, and a
- * signed-out user gets nothing. (Without Supabase configured the app also runs
- * fully open, as in local dev.)
+ * Resolve the current user's effective permissions from their workspace
+ * membership. A workspace `owner` or `admin` gets full access; a `member` gets
+ * the expanded set of their granted capabilities. A signed-out user (or one with
+ * no membership) gets nothing. Without Supabase configured the app runs fully
+ * open (local dev).
  */
 export async function getCurrentPermissions(): Promise<CurrentPermissions> {
   if (!hasSupabase()) {
@@ -40,7 +42,27 @@ export async function getCurrentPermissions(): Promise<CurrentPermissions> {
   try {
     const user = await getSessionUser();
     if (!user) return { isOwner: false, permissions: [] };
-    return { isOwner: true, permissions: [...ALL_PERMISSION_KEYS] };
+
+    const sb = await getSupabaseServer();
+    const { data, error } = await sb
+      .from("workspace_members")
+      .select("role, permissions")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return { isOwner: false, permissions: [] };
+
+    const row = data as { role: string; permissions: string[] | null };
+    const isOwner = row.role === "owner";
+    if (isOwner || row.role === "admin") {
+      return { isOwner, permissions: [...ALL_PERMISSION_KEYS] };
+    }
+    return {
+      isOwner: false,
+      permissions: expandPermissions(cleanPermissions(row.permissions ?? [])),
+    };
   } catch (error) {
     console.error("getCurrentPermissions failed", error);
     return { isOwner: false, permissions: [] };

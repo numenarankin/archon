@@ -19,20 +19,10 @@ import type { Profile } from "@/lib/settings/profile";
 
 const SAVE_DEBOUNCE_MS = 700;
 
-export function ProfileSection({
-  profile,
-  referralCode,
-  appUrl,
-}: {
-  profile: Profile;
-  referralCode: string | null;
-  /** Public base URL (server-resolved) used to build the referral link. */
-  appUrl: string;
-}) {
+export function ProfileSection({ profile }: { profile: Profile }) {
   return (
     <div className="flex max-w-2xl flex-col gap-6">
       <ProfileCard profile={profile} />
-      {referralCode && <ReferralCard code={referralCode} baseUrl={appUrl} />}
     </div>
   );
 }
@@ -208,76 +198,3 @@ function ProfileCard({ profile }: { profile: Profile }) {
   );
 }
 
-/**
- * Shows the org's referral code plus a ready-to-share sign-up link that
- * prefills the code (see the auth page's `?ref=` handling). Each has its own
- * copy button.
- */
-function ReferralCard({ code, baseUrl }: { code: string; baseUrl: string }) {
-  const display = code.toUpperCase();
-  const [copied, setCopied] = useState<"code" | "link" | null>(null);
-
-  // baseUrl is resolved on the server (getAppUrl), so it's reliably present at
-  // runtime even if NEXT_PUBLIC_APP_URL wasn't inlined into the client bundle
-  // at build time — which is what left the shared link without a host.
-  const link = `${baseUrl}/auth?ref=${code.toLowerCase()}`;
-
-  async function copy(value: string, which: "code" | "link") {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(which);
-      window.setTimeout(() => setCopied(null), 1500);
-    } catch {
-      // Clipboard can be unavailable (insecure context); values are visible to
-      // copy manually, so a failure here is non-blocking.
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Refer a company</CardTitle>
-        <CardDescription>
-          Share your code or link. New orgs that sign up get an extra free
-          month.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium">Referral code</span>
-          <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
-            <span className="font-mono text-lg tracking-widest">{display}</span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => copy(display, "code")}
-            >
-              {copied === "code" ? <CheckIcon /> : null}
-              {copied === "code" ? "Copied" : "Copy"}
-            </Button>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium">Referral link</span>
-          <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
-            <span className="truncate font-mono text-sm text-muted-foreground">
-              {link}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              onClick={() => copy(link, "link")}
-            >
-              {copied === "link" ? <CheckIcon /> : null}
-              {copied === "link" ? "Copied" : "Copy link"}
-            </Button>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}

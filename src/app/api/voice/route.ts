@@ -1,7 +1,6 @@
 import { hasElevenLabs } from "@/lib/env";
 import { MAX_TTS_CHARS, streamSpeech } from "@/lib/ai/tts";
 import { forbidUnlessPermitted } from "@/lib/auth/permissions";
-import { gateAI, meterElevenLabsTts } from "@/lib/billing/credits";
 
 // Synthesis of a long answer can take a few seconds; give it room.
 export const maxDuration = 60;
@@ -22,14 +21,6 @@ export async function POST(req: Request) {
     return new Response("ELEVEN_LABS_KEY not configured", { status: 503 });
   }
 
-  const gate = await gateAI();
-  if (!gate.allowed) {
-    return Response.json(
-      { error: "ai_unavailable", reason: gate.reason },
-      { status: 402 }
-    );
-  }
-
   let text = "";
   let previousText: string | undefined;
   try {
@@ -48,8 +39,6 @@ export async function POST(req: Request) {
 
   try {
     const audio = await streamSpeech(clipped, previousText);
-    // Meter by characters synthesized (the clipped length actually sent).
-    void meterElevenLabsTts(clipped.length, "voice:tts");
     return new Response(audio, {
       headers: {
         "Content-Type": "audio/mpeg",

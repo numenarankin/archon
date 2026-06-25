@@ -13,13 +13,6 @@ import { loadContextDocs } from "@/lib/ai/context/docs";
 import { latestUserText, reflectOnTurn } from "@/lib/ai/reflection";
 import { getProfile } from "@/lib/settings/profile";
 import { forbidUnlessPermitted } from "@/lib/auth/permissions";
-import { getSupabaseServer } from "@/lib/supabase/server";
-import {
-  countWebSearchRequests,
-  gateAI,
-  meterAnthropic,
-  meterAnthropicWebSearch,
-} from "@/lib/billing/credits";
 
 // Tool round-trips can take a while; allow longer than a plain completion.
 export const maxDuration = 120;
@@ -40,16 +33,6 @@ export async function POST(req: Request) {
   // Capability gate: block callers without `use_ai` before invoking the model.
   const denied = await forbidUnlessPermitted("use_ai");
   if (denied) return denied;
-
-  // AI-credit gate (see /api/chat for the rationale).
-  const sb = await getSupabaseServer();
-  const gate = await gateAI(sb);
-  if (!gate.allowed) {
-    return Response.json(
-      { error: "ai_unavailable", reason: gate.reason },
-      { status: 402 },
-    );
-  }
 
   const { messages, pageContext }: VoiceChatRequest = await req.json();
 
@@ -83,20 +66,7 @@ export async function POST(req: Request) {
     messages: await convertToModelMessages(messages),
     tools,
     stopWhen: stepCountIs(8),
-    onFinish: ({ totalUsage, steps, text }) => {
-      void meterAnthropic(
-        {
-          inputTokens: totalUsage.inputTokens,
-          outputTokens: totalUsage.outputTokens,
-        },
-        "voice-chat",
-        sb,
-      );
-      void meterAnthropicWebSearch(
-        countWebSearchRequests(steps),
-        "voice-chat:web_search",
-        sb,
-      );
+    onFinish: ({ text }) => {
       // Self-improvement loop, in the background after the spoken turn finishes.
       after(() => reflectOnTurn({ userText, assistantText: text }));
     },

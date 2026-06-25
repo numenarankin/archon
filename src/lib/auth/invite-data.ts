@@ -21,8 +21,8 @@ export async function lookupInvite(token: string): Promise<InviteLookup> {
   try {
     const admin = getSupabaseAdmin();
     const { data, error } = await admin
-      .from("org_members")
-      .select("email, invite_expires_at, invite_accepted_at")
+      .from("workspace_invites")
+      .select("email, expires_at, accepted_at")
       .eq("invite_token_hash", hashInviteToken(token))
       .maybeSingle();
     if (error) throw error;
@@ -30,11 +30,11 @@ export async function lookupInvite(token: string): Promise<InviteLookup> {
 
     const row = data as {
       email: string;
-      invite_expires_at: string | null;
-      invite_accepted_at: string | null;
+      expires_at: string | null;
+      accepted_at: string | null;
     };
-    if (row.invite_accepted_at) return { ok: false, reason: "accepted" };
-    if (row.invite_expires_at && Date.parse(row.invite_expires_at) < Date.now()) {
+    if (row.accepted_at) return { ok: false, reason: "accepted" };
+    if (row.expires_at && Date.parse(row.expires_at) < Date.now()) {
       return { ok: false, reason: "expired" };
     }
     return { ok: true, email: row.email };

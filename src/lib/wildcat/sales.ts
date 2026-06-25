@@ -78,8 +78,8 @@ export interface Prospect {
 }
 
 // A shared objection-handling library — the same quick-reference cards ride
-// along with every prospect on the desk.
-const OBJECTIONS: Objection[] = [
+// along with every prospect on the desk. Editable from the Config tab.
+export const DEFAULT_OBJECTIONS: Objection[] = [
   {
     id: "o-busy",
     trigger: "I'm in the middle of something",
@@ -167,6 +167,20 @@ function pick<T>(arr: T[], i: number): T {
   return arr[i % arr.length];
 }
 
+// Outcomes that mean "already dialed this week" — used to seed some queue cards
+// as called so the strike-through is visible without working the desk first.
+const CALLED_POOL: CallStatus[] = [
+  "no_answer",
+  "callback",
+  "meeting",
+  "not_interested",
+];
+
+/** A prospect counts as called this week once it carries a non-"new" status. */
+export function isCalled(prospect: Prospect): boolean {
+  return prospect.status !== "new";
+}
+
 function buildProspect(day: WeekdayKey, i: number, n: number): Prospect {
   const first = pick(FIRST, n);
   const last = pick(LAST, n * 3 + 1);
@@ -192,7 +206,8 @@ function buildProspect(day: WeekdayKey, i: number, n: number): Prospect {
     phone,
     email,
     location,
-    status: "new",
+    // Seed roughly every fourth prospect as already dialed this week.
+    status: i % 4 === 0 ? pick(CALLED_POOL, n) : "new",
     day,
     hook: `${wells} wells · ${pick(BEST_TIME, n)}`,
     highlights: [
@@ -215,7 +230,7 @@ function buildProspect(day: WeekdayKey, i: number, n: number): Prospect {
       `keep their RRC allowable and proration filings clean without the back-and-forth. ` +
       `Quick question while I've got you — are you the one who handles production ` +
       `reporting on your wells, or is that someone on your team?`,
-    objections: OBJECTIONS,
+    objections: DEFAULT_OBJECTIONS,
     transcript: [
       { speaker: "rep", text: `Hi, is this ${first}?` },
       { speaker: "prospect", text: "Speaking — who's this?" },
@@ -238,4 +253,143 @@ const PROSPECTS: Prospect[] = WEEKDAYS.flatMap((d) => {
 
 export async function getQueuedProspects(): Promise<Prospect[]> {
   return PROSPECTS;
+}
+
+// ---------------------------------------------------------------------------
+// Call history — completed calls, shown in the History tab. Reuses the prospect
+// shape for the detail modal and tacks on when/how-long/notes metadata.
+// ---------------------------------------------------------------------------
+
+export interface CallRecord {
+  id: string;
+  prospect: Prospect;
+  /** ISO date, YYYY-MM-DD. Fixed strings keep SSR + client in sync. */
+  date: string;
+  time: string;
+  duration: string;
+  notes: string;
+}
+
+// Outcomes a completed call can carry (everything except the queue-only "new").
+const HISTORY_STATUSES: CallStatus[] = [
+  "no_answer",
+  "callback",
+  "meeting",
+  "not_interested",
+  "dnc",
+];
+
+const HISTORY_NOTES = [
+  "Reached the gatekeeper, asked for a callback after 2pm. Sounded receptive.",
+  "Left a voicemail — referenced the allowable filing pain point.",
+  "Quick chat. Already runs a competitor but open to a side-by-side. Sending the one-pager.",
+  "Not the decision maker; pointed me to the ops manager. Got the name.",
+  "Wants nothing to do with vendors right now. Marked do-not-call per his request.",
+  "Booked a 30-min demo for next week. Excited about the proration schedule automation.",
+  "Phone tag again. Best window is early morning per the notes.",
+  "Talked numbers — well count makes it an easy ROI. Following up with the email template.",
+];
+
+const HISTORY_TIMES = ["8:42 AM", "9:15 AM", "10:24 AM", "11:38 AM", "1:05 PM", "2:50 PM", "3:33 PM", "4:18 PM"];
+const HISTORY_DURATIONS = ["0m 38s", "1m 12s", "2m 47s", "4m 12s", "5m 53s", "7m 21s", "0m 12s", "3m 04s"];
+
+// Build ~3 weeks of history (June 2026) from the prospect pool, deterministically.
+const CALL_HISTORY: CallRecord[] = PROSPECTS.slice(0, 36).map((p, i) => {
+  // Spread across business days 2026-06-02 .. 2026-06-24, newest assigned last.
+  const dayOfMonth = 2 + ((i * 13) % 23);
+  return {
+    id: `call-${p.id}`,
+    prospect: { ...p, status: pick(HISTORY_STATUSES, i) },
+    date: `2026-06-${String(dayOfMonth).padStart(2, "0")}`,
+    time: pick(HISTORY_TIMES, i * 3),
+    duration: pick(HISTORY_DURATIONS, i * 5),
+    notes: pick(HISTORY_NOTES, i * 2),
+  };
+});
+
+export async function getCallHistory(): Promise<CallRecord[]> {
+  // Newest first.
+  return [...CALL_HISTORY].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+// ---------------------------------------------------------------------------
+// Desk configuration — what the rep sets up on the Config tab and the desk then
+// reads: the opening script template, objection library, and follow-up actions.
+// ---------------------------------------------------------------------------
+
+export type FollowUpType = "calendar_invite" | "scheduling_link" | "custom_email";
+
+export interface FollowUpOption {
+  id: string;
+  type: FollowUpType;
+  label: string;
+  enabled: boolean;
+  /** scheduling_link: the booking URL that gets sent. */
+  schedulingUrl?: string;
+  /** calendar_invite: default meeting length. */
+  duration?: string;
+  /** custom_email: default subject + body (supports the script tokens). */
+  emailSubject?: string;
+  emailBody?: string;
+}
+
+export interface SalesConfig {
+  /** Opening script template — supports {first}, {company}, {city}, {title}. */
+  openingScript: string;
+  objections: Objection[];
+  followUps: FollowUpOption[];
+}
+
+export const SCRIPT_TOKENS = ["{first}", "{company}", "{city}", "{title}"];
+
+const DEFAULT_OPENING_SCRIPT =
+  "Hi {first}, this is Casey over at Wildcat — I know I'm catching you cold, " +
+  "so I'll be quick. We help {city} operators like {company} keep their RRC " +
+  "allowable and proration filings clean without the back-and-forth. Quick " +
+  "question while I've got you — are you the one who handles production " +
+  "reporting on your wells, or is that someone on your team?";
+
+export const DEFAULT_FOLLOW_UPS: FollowUpOption[] = [
+  {
+    id: "fu-calendar",
+    type: "calendar_invite",
+    label: "Send calendar invite",
+    enabled: true,
+    duration: "30 min",
+  },
+  {
+    id: "fu-link",
+    type: "scheduling_link",
+    label: "Send scheduling link",
+    enabled: true,
+    schedulingUrl: "https://cal.com/wildcat/intro",
+  },
+  {
+    id: "fu-email",
+    type: "custom_email",
+    label: "Send custom email",
+    enabled: true,
+    emailSubject: "Following up — Wildcat + {company}",
+    emailBody:
+      "Hi {first},\n\nThanks for the few minutes just now. As promised, here's a " +
+      "quick rundown of how we keep RRC allowable and proration filings clean " +
+      "for {company}.\n\nWorth a closer look?\n\nCasey",
+  },
+];
+
+export const DEFAULT_SALES_CONFIG: SalesConfig = {
+  openingScript: DEFAULT_OPENING_SCRIPT,
+  objections: DEFAULT_OBJECTIONS,
+  followUps: DEFAULT_FOLLOW_UPS,
+};
+
+/** Fill a script/email template's {tokens} from a prospect. */
+export function renderTemplate(template: string, prospect: Prospect): string {
+  const first = prospect.name.split(" ")[0];
+  const city = prospect.location.split(",")[0];
+  return template
+    .replaceAll("{first}", first)
+    .replaceAll("{company}", prospect.company)
+    .replaceAll("{city}", city)
+    .replaceAll("{title}", prospect.title);
 }

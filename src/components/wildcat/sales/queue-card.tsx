@@ -4,6 +4,7 @@ import { useCallback, useRef } from "react";
 import { useDrag, useDrop } from "react-dnd";
 import { cn } from "@/lib/utils";
 import {
+  isCalled,
   QUEUE_DND_TYPE,
   statusMeta,
   type Prospect,
@@ -74,12 +75,16 @@ export function QueueCard({
   );
 
   const status = statusMeta(prospect.status);
+  // Already dialed this week → strike the card so the rep skips it.
+  const called = isCalled(prospect);
 
   return (
     <div
       ref={attachRef}
+      title={called ? `Called this week · ${status.label}` : undefined}
       className={cn(
         "flex cursor-grab items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 shadow-sm transition-colors hover:border-foreground/20 active:cursor-grabbing",
+        called && "bg-muted/40",
         isDragging && "opacity-40"
       )}
     >
@@ -88,14 +93,29 @@ export function QueueCard({
         title={status.label}
       />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-medium leading-tight text-foreground">
+        <p
+          className={cn(
+            "truncate text-xs font-medium leading-tight text-foreground",
+            called && "text-muted-foreground line-through"
+          )}
+        >
           {prospect.name}
-          <span className="ml-1.5 font-normal text-muted-foreground">
+          <span
+            className={cn(
+              "ml-1.5 font-normal text-muted-foreground",
+              called && "line-through"
+            )}
+          >
             {prospect.company}
           </span>
         </p>
       </div>
-      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/80">
+      <span
+        className={cn(
+          "shrink-0 text-[11px] tabular-nums text-muted-foreground/80",
+          called && "line-through"
+        )}
+      >
         {prospect.phone}
       </span>
     </div>

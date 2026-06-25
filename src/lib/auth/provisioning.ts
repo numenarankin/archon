@@ -33,9 +33,12 @@ export async function ensureWorkspace(user: User): Promise<void> {
   if (existing) return;
 
   const name = workspaceNameFor(user.email);
+  // onboarding_completed_at stays NULL so the proxy gate routes this new owner
+  // through /onboarding. owner_uid records who owns the workspace (the gate and
+  // settings key off it).
   const { data: ws, error: wsErr } = await admin
     .from("workspaces")
-    .insert({ name })
+    .insert({ name, owner_uid: user.id })
     .select("id")
     .single();
   if (wsErr || !ws) {
@@ -46,7 +49,12 @@ export async function ensureWorkspace(user: User): Promise<void> {
 
   const { error: memberErr } = await admin
     .from("workspace_members")
-    .insert({ workspace_id: workspaceId, user_id: user.id, role: "owner" });
+    .insert({
+      workspace_id: workspaceId,
+      user_id: user.id,
+      role: "owner",
+      email: user.email ?? null,
+    });
   if (memberErr) {
     console.error("ensureWorkspace member insert failed", memberErr);
     return;

@@ -97,10 +97,10 @@ export async function saveProfile(
     .single();
   if (error) throw new Error(`saveProfile: ${error.message}`);
 
-  // Company name + address live on the organization (so every member sees the
-  // same values), not the per-user profile. Filtering by owner_uid targets the
-  // caller's org and makes a non-owner editor simply no-op; the org's owner-only
-  // RLS write policy backs that up.
+  // Company name + address live on the workspace (so every member sees the same
+  // values), not the per-user profile. Filtering by owner_uid targets the
+  // caller's owned workspace and makes a non-owner editor a no-op; the workspace
+  // admin-only RLS write policy backs that up.
   const orgUpdate: { name?: string; company_address?: string } = {};
   if (formData.has("companyName"))
     orgUpdate.name = String(formData.get("companyName")).trim();
@@ -108,16 +108,17 @@ export async function saveProfile(
     orgUpdate.company_address = String(formData.get("companyAddress")).trim();
   if (Object.keys(orgUpdate).length > 0) {
     const { error: orgErr } = await sb
-      .from("organizations")
+      .from("workspaces")
       .update(orgUpdate)
       .eq("owner_uid", user.id);
-    if (orgErr) throw new Error(`saveProfile (organization): ${orgErr.message}`);
+    if (orgErr) throw new Error(`saveProfile (workspace): ${orgErr.message}`);
   }
 
-  // Read back the org name (the source of truth) to return as companyName.
+  // Read back the workspace name (the source of truth) to return as companyName.
   const { data: org } = await sb
-    .from("organizations")
+    .from("workspaces")
     .select("name")
+    .eq("owner_uid", user.id)
     .maybeSingle<{ name: string | null }>();
 
   // The avatar + name show in the app shell (rendered by the root layout), so
@@ -139,6 +140,15 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 export interface InviteResult {
   /** Email the invite link was delivered to. */
   email: string;
+}
+
+/** The workspace the signed-in admin is acting in (their primary workspace). */
+async function callerWorkspaceId(
+  sb: Awaited<ReturnType<typeof getSupabaseServer>>
+): Promise<string> {
+  const { data, error } = await sb.rpc("app_default_workspace_id");
+  if (error || !data) throw new Error("No workspace for the current user.");
+  return data as string;
 }
 
 /**
@@ -164,28 +174,39 @@ export async function inviteMember(
     throw new Error("Enter a valid email address.");
   }
 
+  const workspaceId = await callerWorkspaceId(sb);
+
+  // Already an active member of this workspace?
+  const { data: existingMember } = await sb
+    .from("workspace_members")
+    .select("user_id")
+    .eq("workspace_id", workspaceId)
+    .eq("email", normalized)
+    .maybeSingle();
+  if (existingMember) throw new Error("That person is already a member.");
+
   const granted = permissions
     ? cleanPermissions(permissions)
     : DEFAULT_PERMISSIONS;
 
   const token = generateInviteToken();
   const { data: inserted, error } = await sb
-    .from("org_members")
+    .from("workspace_invites")
     .insert({
-      name: name.trim(),
+      workspace_id: workspaceId,
       email: normalized,
-      is_owner: false,
+      invited_name: name.trim(),
+      role: "member",
       permissions: granted,
-      status: "invited",
       invite_token_hash: hashInviteToken(token),
-      invite_expires_at: inviteExpiry(Date.now()),
+      expires_at: inviteExpiry(Date.now()),
     })
     .select("id")
     .single();
   if (error) {
-    // 23505 = unique_violation: the email is already a member.
+    // 23505 = unique_violation: an invite for this email already exists.
     if (error.code === "23505") {
-      throw new Error("That person is already a member.");
+      throw new Error("That person has already been invited.");
     }
     throw new Error(`inviteMember: ${error.message}`);
   }
@@ -194,7 +215,7 @@ export async function inviteMember(
     await sendInviteEmail({ name: name.trim(), email: normalized, token });
   } catch (sendErr) {
     // Roll back so we don't leave an unreachable pending invite.
-    await sb.from("org_members").delete().eq("id", inserted.id);
+    await sb.from("workspace_invites").delete().eq("id", inserted.id);
     const reason = sendErr instanceof Error ? sendErr.message : "unknown error";
     throw new Error(`Couldn't email the invite: ${reason}`);
   }
@@ -204,90 +225,96 @@ export async function inviteMember(
 }
 
 /**
- * Replace a member's granted capabilities. The owner always has full access and
- * can't be edited here.
+ * Replace an active member's granted capabilities (keyed by their auth user id).
+ * The workspace owner always has full access and can't be edited here.
  */
 export async function setMemberPermissions(
-  id: string,
+  userId: string,
   permissions: PermissionKey[]
 ): Promise<void> {
   await requireAdmin();
   const sb = await getSupabaseServer();
+  const workspaceId = await callerWorkspaceId(sb);
 
   const { data: member, error: readErr } = await sb
-    .from("org_members")
-    .select("is_owner")
-    .eq("id", id)
+    .from("workspace_members")
+    .select("role")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId)
     .maybeSingle();
   if (readErr) throw new Error(`setMemberPermissions: ${readErr.message}`);
-  if (member?.is_owner) {
+  if (member?.role === "owner") {
     throw new Error("The owner's permissions can't be changed.");
   }
 
   const { error } = await sb
-    .from("org_members")
+    .from("workspace_members")
     .update({ permissions: cleanPermissions(permissions) })
-    .eq("id", id);
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId);
   if (error) throw new Error(`setMemberPermissions: ${error.message}`);
   revalidatePath("/settings");
 }
 
-/** Remove a member from the org. The owner can't be removed. */
-export async function removeMember(id: string): Promise<void> {
+/** Remove an active member (keyed by auth user id). The owner can't be removed. */
+export async function removeMember(userId: string): Promise<void> {
   await requireAdmin();
   const sb = await getSupabaseServer();
+  const workspaceId = await callerWorkspaceId(sb);
 
   const { data: member, error: readErr } = await sb
-    .from("org_members")
-    .select("is_owner")
-    .eq("id", id)
+    .from("workspace_members")
+    .select("role")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId)
     .maybeSingle();
   if (readErr) throw new Error(`removeMember: ${readErr.message}`);
-  if (member?.is_owner) {
+  if (member?.role === "owner") {
     throw new Error("The owner can't be removed.");
   }
 
-  const { error } = await sb.from("org_members").delete().eq("id", id);
+  const { error } = await sb
+    .from("workspace_members")
+    .delete()
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId);
   if (error) throw new Error(`removeMember: ${error.message}`);
   revalidatePath("/settings");
 }
 
 /**
- * Re-issue a pending member's invite: mint a fresh token (so the old link dies),
- * reset the 7-day expiry, clear any prior acceptance stamp, and email the new
- * link to the invitee. Only works on rows still 'invited'.
+ * Re-issue a pending invite (keyed by invite id): mint a fresh token (so the old
+ * link dies), reset the 7-day expiry, and email the new link. Only works on
+ * invites that haven't been accepted.
  */
 export async function resendInvite(id: string): Promise<InviteResult> {
   await requireAdmin();
   const sb = await getSupabaseServer();
 
-  const { data: member, error: readErr } = await sb
-    .from("org_members")
-    .select("status, name, email")
+  const { data: invite, error: readErr } = await sb
+    .from("workspace_invites")
+    .select("invited_name, email, accepted_at")
     .eq("id", id)
     .maybeSingle();
   if (readErr) throw new Error(`resendInvite: ${readErr.message}`);
-  if (!member) throw new Error("That invite no longer exists.");
-  if (member.status !== "invited") {
-    throw new Error("That member has already joined.");
-  }
+  if (!invite) throw new Error("That invite no longer exists.");
+  if (invite.accepted_at) throw new Error("That member has already joined.");
 
   const token = generateInviteToken();
   const { error } = await sb
-    .from("org_members")
+    .from("workspace_invites")
     .update({
       invite_token_hash: hashInviteToken(token),
-      invite_expires_at: inviteExpiry(Date.now()),
-      invite_accepted_at: null,
+      expires_at: inviteExpiry(Date.now()),
     })
     .eq("id", id)
-    .eq("status", "invited");
+    .is("accepted_at", null);
   if (error) throw new Error(`resendInvite: ${error.message}`);
 
   try {
     await sendInviteEmail({
-      name: member.name ?? "",
-      email: member.email,
+      name: invite.invited_name ?? "",
+      email: invite.email,
       token,
     });
   } catch (sendErr) {
@@ -296,32 +323,22 @@ export async function resendInvite(id: string): Promise<InviteResult> {
   }
 
   revalidatePath("/settings");
-  return { email: member.email };
+  return { email: invite.email };
 }
 
 /**
- * Revoke a pending invite — deletes the 'invited' row so the link can no longer
- * be accepted. Refuses to touch active members (use `removeMember` for those).
+ * Revoke a pending invite (keyed by invite id) so the link can no longer be
+ * accepted. Active members are removed with `removeMember` instead.
  */
 export async function cancelInvite(id: string): Promise<void> {
   await requireAdmin();
   const sb = await getSupabaseServer();
 
-  const { data: member, error: readErr } = await sb
-    .from("org_members")
-    .select("status")
-    .eq("id", id)
-    .maybeSingle();
-  if (readErr) throw new Error(`cancelInvite: ${readErr.message}`);
-  if (member && member.status !== "invited") {
-    throw new Error("That member has already joined; remove them instead.");
-  }
-
   const { error } = await sb
-    .from("org_members")
+    .from("workspace_invites")
     .delete()
     .eq("id", id)
-    .eq("status", "invited");
+    .is("accepted_at", null);
   if (error) throw new Error(`cancelInvite: ${error.message}`);
   revalidatePath("/settings");
 }

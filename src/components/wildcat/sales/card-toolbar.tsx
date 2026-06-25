@@ -3,7 +3,6 @@
 import { useState } from "react";
 import {
   CalendarPlusIcon,
-  CheckIcon,
   ChevronDownIcon,
   PhoneIcon,
   UserPlusIcon,
@@ -17,10 +16,14 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { STATUSES, statusMeta, type CallStatus, type Prospect } from "@/lib/wildcat/sales";
-
-const FOLLOWUP_DAYS = ["Tomorrow", "In 3 days", "Next week", "In 2 weeks"];
-const FOLLOWUP_TIMES = ["9:00 AM", "11:30 AM", "2:00 PM", "4:30 PM"];
+import { FollowUpModal } from "@/components/wildcat/sales/follow-up-modal";
+import {
+  STATUSES,
+  statusMeta,
+  type CallStatus,
+  type FollowUpOption,
+  type Prospect,
+} from "@/lib/wildcat/sales";
 
 /**
  * The action bar across the top of the call card. Each control is a couple of
@@ -29,15 +32,17 @@ const FOLLOWUP_TIMES = ["9:00 AM", "11:30 AM", "2:00 PM", "4:30 PM"];
  */
 export function CardToolbar({
   prospect,
+  followUps,
   onStatusChange,
   onLogNext,
 }: {
   prospect: Prospect;
+  followUps: FollowUpOption[];
   onStatusChange: (status: CallStatus) => void;
   onLogNext: () => void;
 }) {
   const status = statusMeta(prospect.status);
-  const [followUp, setFollowUp] = useState<string | null>(null);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
 
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-3 border-b px-4 py-2.5">
@@ -57,35 +62,11 @@ export function CardToolbar({
       </div>
 
       <div className="ml-auto flex items-center gap-1.5">
-        {/* Schedule a follow-up — day + time chips, then email the invite. */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={<Button variant="outline" size="sm" />}
-          >
-            <CalendarPlusIcon />
-            Follow-up
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64 p-3">
-            <p className="mb-2 text-xs font-semibold text-foreground">
-              Schedule a follow-up
-            </p>
-            <ChipRow label="When" options={FOLLOWUP_DAYS} />
-            <ChipRow label="Time" options={FOLLOWUP_TIMES} />
-            <Button
-              size="sm"
-              className="mt-3 w-full"
-              onClick={() => setFollowUp(`${FOLLOWUP_DAYS[0]}, ${FOLLOWUP_TIMES[1]}`)}
-            >
-              Email invite to {prospect.email.split("@")[0]}
-            </Button>
-            {followUp && (
-              <p className="mt-2 flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">
-                <CheckIcon className="size-3" />
-                Invite sent · {followUp}
-              </p>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Schedule a follow-up — opens the full action modal. */}
+        <Button variant="outline" size="sm" onClick={() => setFollowUpOpen(true)}>
+          <CalendarPlusIcon />
+          Follow-up
+        </Button>
 
         {/* Add / correct contact info. */}
         <DropdownMenu>
@@ -134,34 +115,13 @@ export function CardToolbar({
           Log &amp; next
         </Button>
       </div>
-    </div>
-  );
-}
 
-function ChipRow({ label, options }: { label: string; options: string[] }) {
-  const [active, setActive] = useState(0);
-  return (
-    <div className="mb-2">
-      <p className="mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-        {label}
-      </p>
-      <div className="flex flex-wrap gap-1">
-        {options.map((opt, i) => (
-          <button
-            key={opt}
-            type="button"
-            onClick={() => setActive(i)}
-            className={cn(
-              "rounded-full border px-2 py-0.5 text-[11px] transition-colors",
-              active === i
-                ? "border-foreground bg-foreground text-background"
-                : "border-border text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {opt}
-          </button>
-        ))}
-      </div>
+      <FollowUpModal
+        open={followUpOpen}
+        onClose={() => setFollowUpOpen(false)}
+        prospect={prospect}
+        options={followUps.filter((o) => o.enabled)}
+      />
     </div>
   );
 }
