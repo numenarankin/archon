@@ -22,6 +22,7 @@ import {
   PencilIcon,
   PinIcon,
   FolderInputIcon,
+  Share2Icon,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -57,6 +58,7 @@ const DiagramCanvas = dynamic(
   { ssr: false }
 );
 import { MoveToFolderDialog } from "@/components/files/move-to-folder-dialog";
+import { ShareDialog } from "@/components/files/share-dialog";
 import type { RepoFile, RepoFolder } from "@/lib/kb/types";
 import type { KBFileType } from "@/lib/kb/types";
 
@@ -104,6 +106,8 @@ export function FileBrowser({ root }: FileBrowserProps) {
   const [folderDraft, setFolderDraft] = useState("");
   const [viewing, setViewing] = useState<RepoFile | null>(null);
   const [movingFile, setMovingFile] = useState<RepoFile | null>(null);
+  const [sharingFile, setSharingFile] = useState<RepoFile | null>(null);
+  const [sharingFolder, setSharingFolder] = useState<RepoFolder | null>(null);
   const [, startTransition] = useTransition();
   const [uploadingNames, setUploadingNames] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -501,7 +505,7 @@ export function FileBrowser({ root }: FileBrowserProps) {
               <TableRow
                 key={folder.id}
                 onClick={() => setPathIds([...pathIds, folder.id])}
-                className="cursor-pointer"
+                className="group/row cursor-pointer"
               >
                 <TableCell>
                   <FolderIcon
@@ -519,7 +523,24 @@ export function FileBrowser({ root }: FileBrowserProps) {
                 <TableCell className="text-tertiary-text">
                   {folder.modified || "—"}
                 </TableCell>
-                <TableCell />
+                <TableCell>
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className={cn(
+                      "flex items-center justify-end transition-opacity",
+                      "opacity-0 group-hover/row:opacity-100 focus-within:opacity-100"
+                    )}
+                  >
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Share"
+                      onClick={() => setSharingFolder(folder)}
+                    >
+                      <Share2Icon />
+                    </Button>
+                  </div>
+                </TableCell>
               </TableRow>
             ))}
 
@@ -594,6 +615,14 @@ export function FileBrowser({ root }: FileBrowserProps) {
                       <Button
                         variant="ghost"
                         size="icon-sm"
+                        aria-label="Share"
+                        onClick={() => setSharingFile(file)}
+                      >
+                        <Share2Icon />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
                         aria-label="Move to folder"
                         onClick={() => setMovingFile(file)}
                       >
@@ -647,6 +676,30 @@ export function FileBrowser({ root }: FileBrowserProps) {
           currentFolderId={current.id}
           fileName={movingFile.name}
           onMove={(target) => handleMove(movingFile, target)}
+        />
+      )}
+
+      {sharingFile && (
+        <ShareDialog
+          open={sharingFile !== null}
+          onOpenChange={(o) => {
+            if (!o) setSharingFile(null);
+          }}
+          resourceType="file"
+          resourceId={sharingFile.id}
+          resourceName={sharingFile.name}
+        />
+      )}
+
+      {sharingFolder && (
+        <ShareDialog
+          open={sharingFolder !== null}
+          onOpenChange={(o) => {
+            if (!o) setSharingFolder(null);
+          }}
+          resourceType="folder"
+          resourceId={sharingFolder.id}
+          resourceName={sharingFolder.name}
         />
       )}
     </div>

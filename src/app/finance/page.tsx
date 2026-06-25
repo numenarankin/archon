@@ -6,8 +6,10 @@ import {
   MoneyInTable,
   MoneyOutTable,
 } from "@/components/finance/transaction-tables";
+import { requirePermission } from "@/lib/auth/permissions";
 
 export default async function FinancePage() {
+  await requirePermission("view_accounting");
   const {
     accounts,
     totalAvailable,

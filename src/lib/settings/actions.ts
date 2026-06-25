@@ -12,6 +12,7 @@ import {
 import { sendInviteEmail } from "@/lib/email/invite-email";
 import {
   cleanPermissions,
+  expandPermissions,
   DEFAULT_PERMISSIONS,
   type PermissionKey,
 } from "@/lib/settings/org";
@@ -185,8 +186,10 @@ export async function inviteMember(
     .maybeSingle();
   if (existingMember) throw new Error("That person is already a member.");
 
+  // Store the EXPANDED set so the DB capability check (app_has_capability) is a
+  // plain array membership test (manage_* already implies its view_*).
   const granted = permissions
-    ? cleanPermissions(permissions)
+    ? expandPermissions(cleanPermissions(permissions))
     : DEFAULT_PERMISSIONS;
 
   const token = generateInviteToken();
@@ -249,7 +252,7 @@ export async function setMemberPermissions(
 
   const { error } = await sb
     .from("workspace_members")
-    .update({ permissions: cleanPermissions(permissions) })
+    .update({ permissions: expandPermissions(cleanPermissions(permissions)) })
     .eq("workspace_id", workspaceId)
     .eq("user_id", userId);
   if (error) throw new Error(`setMemberPermissions: ${error.message}`);

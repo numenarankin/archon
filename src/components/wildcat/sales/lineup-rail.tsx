@@ -24,11 +24,13 @@ export function LineupRail({
   currentId,
   onPick,
   onReorder,
+  onPersist,
 }: {
   lineup: Prospect[];
   currentId: string | null;
   onPick: (id: string) => void;
   onReorder: (dragId: string, targetId: string, placeAfter: boolean) => void;
+  onPersist?: () => void;
 }) {
   return (
     <div className="flex w-56 shrink-0 flex-col rounded-xl bg-muted/40">
@@ -49,6 +51,7 @@ export function LineupRail({
             active={p.id === currentId}
             onPick={onPick}
             onReorder={onReorder}
+            onPersist={onPersist}
           />
         ))}
       </div>
@@ -62,12 +65,14 @@ function LineupCard({
   active,
   onPick,
   onReorder,
+  onPersist,
 }: {
   prospect: Prospect;
   index: number;
   active: boolean;
   onPick: (id: string) => void;
   onReorder: (dragId: string, targetId: string, placeAfter: boolean) => void;
+  onPersist?: () => void;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
 
@@ -79,9 +84,10 @@ function LineupCard({
     () => ({
       type: LINEUP_DND_TYPE,
       item: { id: prospect.id },
+      end: () => onPersist?.(),
       collect: (m) => ({ isDragging: m.isDragging() }),
     }),
-    [prospect.id]
+    [prospect.id, onPersist]
   );
 
   const [, dropRef] = useDrop<LineupDragItem, unknown, unknown>(

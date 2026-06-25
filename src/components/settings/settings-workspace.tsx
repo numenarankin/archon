@@ -53,13 +53,15 @@ export function SettingsWorkspace({
   initialSection?: string;
 }) {
   // Org settings (every tab but Profile) are admin-only; non-admins see only
-  // their own profile. This mirrors the server-side requireAdmin guards on the
-  // settings actions — the UI hiding is convenience, not the security boundary.
+  // Only the Organization tab (members, company info) is admin-only. Profile,
+  // Integrations (your own Google connection), and Archon (your own skills +
+  // agent persona) are per-user, so every member can reach them. The
+  // server-side guards remain the security boundary; this hiding is convenience.
   const isAdmin = useCan("admin");
-  const nav = isAdmin ? NAV : NAV.filter((item) => item.id === "profile");
+  const nav = isAdmin ? NAV : NAV.filter((item) => item.id !== "organization");
   const requested = isSection(initialSection) ? initialSection : "profile";
   const [section, setSection] = useState<Section>(
-    isAdmin || requested === "profile" ? requested : "profile"
+    requested === "organization" && !isAdmin ? "profile" : requested
   );
 
   return (
@@ -95,10 +97,10 @@ export function SettingsWorkspace({
             companyAddress={companyAddress}
           />
         )}
-        {isAdmin && section === "integrations" && (
+        {section === "integrations" && (
           <IntegrationsSection google={googleSettings} />
         )}
-        {isAdmin && section === "archon" && (
+        {section === "archon" && (
           <ArchonSection customSkills={customSkills} docs={contextDocs} />
         )}
       </div>

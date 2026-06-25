@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "@/lib/auth/permissions";
+import { requireUser } from "@/lib/auth/session";
 import { getSupabaseServer } from "@/lib/supabase/server";
 import {
   updateContextDoc,
@@ -24,7 +24,7 @@ export async function saveContextDoc(
   docType: ContextDocType,
   content: string
 ): Promise<void> {
-  await requireAdmin();
+  await requireUser();
   await updateContextDoc(docType, content, { updatedBy: "user" });
   revalidatePath("/settings");
 }
@@ -33,7 +33,7 @@ export async function saveContextDoc(
 export async function listContextRevisions(
   docType: ContextDocType
 ): Promise<ContextRevision[]> {
-  await requireAdmin();
+  await requireUser();
   const sb = await getSupabaseServer();
   const { data, error } = await sb
     .from("agent_context_revisions")
@@ -65,7 +65,7 @@ export async function rollbackContextDoc(
   content: string,
   toVersion: number
 ): Promise<void> {
-  await requireAdmin();
+  await requireUser();
   await updateContextDoc(docType, content, {
     updatedBy: "user",
     rationale: `Rolled back to version ${toVersion}`,

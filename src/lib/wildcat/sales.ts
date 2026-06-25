@@ -243,16 +243,23 @@ function buildProspect(day: WeekdayKey, i: number, n: number): Prospect {
   };
 }
 
-// Generate the full week once at module load.
-const PROSPECTS: Prospect[] = WEEKDAYS.flatMap((d) => {
+// Generate the full week once at module load. Exported as the seed/fallback the
+// Supabase data layer uses before the desk is populated (see sales-data.ts).
+export const SEED_PROSPECTS: Prospect[] = WEEKDAYS.flatMap((d) => {
   const count = PER_DAY[d.key];
   return Array.from({ length: count }, (_, i) =>
     buildProspect(d.key, i, i + d.key.charCodeAt(0))
   );
 });
 
-export async function getQueuedProspects(): Promise<Prospect[]> {
-  return PROSPECTS;
+/** Map the 1..5 queue_day column to a weekday key (and back). */
+export const DAY_KEYS: WeekdayKey[] = ["mon", "tue", "wed", "thu", "fri"];
+export function dayKeyFromNum(n: number | null | undefined): WeekdayKey {
+  return DAY_KEYS[(n ?? 1) - 1] ?? "mon";
+}
+export function numFromDayKey(key: WeekdayKey): number {
+  const i = DAY_KEYS.indexOf(key);
+  return i === -1 ? 1 : i + 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -294,22 +301,26 @@ const HISTORY_TIMES = ["8:42 AM", "9:15 AM", "10:24 AM", "11:38 AM", "1:05 PM", 
 const HISTORY_DURATIONS = ["0m 38s", "1m 12s", "2m 47s", "4m 12s", "5m 53s", "7m 21s", "0m 12s", "3m 04s"];
 
 // Build ~3 weeks of history (June 2026) from the prospect pool, deterministically.
-const CALL_HISTORY: CallRecord[] = PROSPECTS.slice(0, 36).map((p, i) => {
-  // Spread across business days 2026-06-02 .. 2026-06-24, newest assigned last.
-  const dayOfMonth = 2 + ((i * 13) % 23);
-  return {
-    id: `call-${p.id}`,
-    prospect: { ...p, status: pick(HISTORY_STATUSES, i) },
-    date: `2026-06-${String(dayOfMonth).padStart(2, "0")}`,
-    time: pick(HISTORY_TIMES, i * 3),
-    duration: pick(HISTORY_DURATIONS, i * 5),
-    notes: pick(HISTORY_NOTES, i * 2),
-  };
-});
+// Exported as the seed/fallback used by the Supabase data layer (sales-data.ts).
+export const SEED_CALL_HISTORY: CallRecord[] = SEED_PROSPECTS.slice(0, 36)
+  .map((p, i) => {
+    // Spread across business days 2026-06-02 .. 2026-06-24, newest assigned last.
+    const dayOfMonth = 2 + ((i * 13) % 23);
+    return {
+      id: `call-${p.id}`,
+      prospect: { ...p, status: pick(HISTORY_STATUSES, i) },
+      date: `2026-06-${String(dayOfMonth).padStart(2, "0")}`,
+      time: pick(HISTORY_TIMES, i * 3),
+      duration: pick(HISTORY_DURATIONS, i * 5),
+      notes: pick(HISTORY_NOTES, i * 2),
+    };
+  })
+  .sort((a, b) => b.date.localeCompare(a.date));
 
-export async function getCallHistory(): Promise<CallRecord[]> {
-  // Newest first.
-  return [...CALL_HISTORY].sort((a, b) => b.date.localeCompare(a.date));
+/** Format a call's second count as "Xm Ys" for the History table. */
+export function formatDuration(seconds: number | null | undefined): string {
+  const s = Math.max(0, Math.floor(seconds ?? 0));
+  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 }
 
 // ---------------------------------------------------------------------------

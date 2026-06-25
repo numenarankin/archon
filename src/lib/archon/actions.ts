@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { getSupabaseServer } from "@/lib/supabase/server";
-import { requireAdmin } from "@/lib/auth/permissions";
+import { requireUser } from "@/lib/auth/session";
 import { regenerateSkillsMenu } from "@/lib/archon/skills-menu";
 import { getToolCatalog, type ToolInfo } from "@/lib/ai/tool-catalog";
 import type { SkillCategory } from "@/lib/archon/skills";
@@ -30,7 +30,7 @@ function scheduleMenuRebuild(): void {
 
 /** The full tool catalog for the skill editor's tool picker. */
 export async function listToolCatalog(): Promise<ToolInfo[]> {
-  await requireAdmin();
+  await requireUser();
   return getToolCatalog();
 }
 
@@ -38,7 +38,7 @@ export async function listToolCatalog(): Promise<ToolInfo[]> {
 export async function createCustomSkill(
   input: CustomSkillInput
 ): Promise<{ id: string }> {
-  await requireAdmin();
+  await requireUser();
   const sb = await getSupabaseServer();
   const { data, error } = await sb
     .from("archon_skills")
@@ -64,7 +64,7 @@ export async function updateCustomSkill(
   id: string,
   input: CustomSkillInput
 ): Promise<void> {
-  await requireAdmin();
+  await requireUser();
   const sb = await getSupabaseServer();
   const { error } = await sb
     .from("archon_skills")
@@ -87,7 +87,7 @@ export async function setSkillEnabled(
   id: string,
   enabled: boolean
 ): Promise<void> {
-  await requireAdmin();
+  await requireUser();
   const sb = await getSupabaseServer();
   const { error } = await sb
     .from("archon_skills")
@@ -100,7 +100,7 @@ export async function setSkillEnabled(
 
 /** Permanently remove a custom skill. */
 export async function deleteCustomSkill(id: string): Promise<void> {
-  await requireAdmin();
+  await requireUser();
   const sb = await getSupabaseServer();
   const { error } = await sb.from("archon_skills").delete().eq("id", id);
   if (error) throw new Error(`deleteCustomSkill: ${error.message}`);

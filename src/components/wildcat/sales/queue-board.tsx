@@ -18,9 +18,12 @@ function sameOrder(a: Prospect[], b: Prospect[]): boolean {
 export function QueueBoard({
   prospects,
   onChange,
+  onPersist,
 }: {
   prospects: Prospect[];
   onChange: Dispatch<SetStateAction<Prospect[]>>;
+  /** Called when a drag ends, to persist the settled order. */
+  onPersist?: () => void;
 }) {
   // Reposition the dragged card next to a target card, adopting its day.
   const handleReorder = useCallback(
@@ -67,6 +70,7 @@ export function QueueBoard({
             prospects={prospects.filter((p) => p.day === day.key)}
             onDropToEnd={handleDropToEnd}
             onReorder={handleReorder}
+            onPersist={onPersist}
           />
         ))}
       </div>

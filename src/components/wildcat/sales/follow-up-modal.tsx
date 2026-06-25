@@ -20,6 +20,7 @@ import {
   type FollowUpType,
   type Prospect,
 } from "@/lib/wildcat/sales";
+import { scheduleFollowUp } from "@/lib/wildcat/sales-actions";
 
 const TYPE_ICON: Record<FollowUpType, typeof MailIcon> = {
   calendar_invite: CalendarPlusIcon,
@@ -30,32 +31,6 @@ const TYPE_ICON: Record<FollowUpType, typeof MailIcon> = {
 const DURATIONS = ["15 min", "30 min", "45 min", "60 min"];
 // Prototype default date — the real UI would seed this from "tomorrow".
 const DEFAULT_DATE = "2026-06-26";
-
-const dateFmt = new Intl.DateTimeFormat("en-US", {
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
-
-function formatDate(iso: string): string {
-  if (!iso) return "—";
-  return dateFmt.format(new Date(`${iso}T00:00:00Z`));
-}
-
-/**
- * Mock Google Meet code (3-4-3 lowercase letters), derived from the prospect id
- * so it's stable. The real link comes back from the Calendar API — see the note
- * in the Send handler below.
- */
-function mockMeetLink(seed: string): string {
-  const a = "abcdefghijklmnopqrstuvwxyz";
-  const part = (len: number, off: number) =>
-    Array.from({ length: len }, (_, k) =>
-      a[(seed.charCodeAt((k + off) % seed.length) + k * 7) % 26]
-    ).join("");
-  return `meet.google.com/${part(3, 0)}-${part(4, 3)}-${part(3, 7)}`;
-}
 
 export function FollowUpModal({
   open,
@@ -168,6 +143,10 @@ function FollowUpDetail({
     Math.max(0, DURATIONS.indexOf(option.duration ?? "30 min"))
   );
   const [addMeet, setAddMeet] = useState(true);
+  // Scheduling-link message.
+  const [linkMsg, setLinkMsg] = useState(
+    `Hi ${prospect.name.split(" ")[0]}, grab whatever time works best:`
+  );
   // Custom email state.
   const [subject, setSubject] = useState(
     renderTemplate(option.emailSubject ?? "", prospect)
@@ -175,11 +154,24 @@ function FollowUpDetail({
   const [body, setBody] = useState(
     renderTemplate(option.emailBody ?? "", prospect)
   );
+  const [pending, setPending] = useState(false);
 
   const recipient = prospect.email;
 
+  // Run a follow-up action and surface its confirmation message.
+  async function dispatch(input: Parameters<typeof scheduleFollowUp>[0]) {
+    setPending(true);
+    try {
+      const res = await scheduleFollowUp(input);
+      onSend(res.message);
+    } catch (error) {
+      onSend(error instanceof Error ? error.message : "Something went wrong.");
+    } finally {
+      setPending(false);
+    }
+  }
+
   if (option.type === "calendar_invite") {
-    const meetLink = addMeet ? mockMeetLink(prospect.id) : null;
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
@@ -216,7 +208,7 @@ function FollowUpDetail({
                 Add Google Meet link
               </p>
               <p className="text-[11px] text-muted-foreground">
-                {meetLink ? meetLink : "A Meet link is generated and attached."}
+                A Meet link is generated and attached to the invite.
               </p>
             </div>
           </div>
@@ -229,18 +221,23 @@ function FollowUpDetail({
         <Button
           size="sm"
           className="w-full"
+          disabled={pending}
           onClick={() =>
-            // PROTOTYPE: in production this calls createGoogleCalendarEvent with
-            // conferenceData.createRequest, then reads back the real hangoutLink.
-            onSend(
-              `Calendar invite sent — ${formatDate(date)} at ${time}, ${
-                DURATIONS[durIdx]
-              }.${meetLink ? ` Meet: ${meetLink}` : ""}`
-            )
+            dispatch({
+              prospectId: prospect.id,
+              type: "calendar_invite",
+              toEmail: recipient,
+              toName: prospect.name,
+              date,
+              time,
+              durationMinutes: parseInt(DURATIONS[durIdx], 10),
+              addMeet,
+              title: `Wildcat intro — ${prospect.company}`,
+            })
           }
         >
           <SendIcon />
-          Send invite
+          {pending ? "Sending…" : "Send invite"}
         </Button>
       </div>
     );
@@ -254,7 +251,8 @@ function FollowUpDetail({
         </Labeled>
         <Labeled label="Message (optional)">
           <textarea
-            defaultValue={`Hi ${prospect.name.split(" ")[0]}, grab whatever time works best:`}
+            value={linkMsg}
+            onChange={(e) => setLinkMsg(e.target.value)}
             rows={2}
             className="w-full resize-none rounded-lg border bg-transparent px-2.5 py-1.5 text-xs outline-none focus-visible:border-ring"
           />
@@ -262,10 +260,21 @@ function FollowUpDetail({
         <Button
           size="sm"
           className="w-full"
-          onClick={() => onSend(`Scheduling link sent to ${recipient}.`)}
+          disabled={pending}
+          onClick={() =>
+            dispatch({
+              prospectId: prospect.id,
+              type: "scheduling_link",
+              toEmail: recipient,
+              toName: prospect.name,
+              schedulingUrl: option.schedulingUrl,
+              subject: "Let's find a time",
+              body: linkMsg,
+            })
+          }
         >
           <SendIcon />
-          Send link
+          {pending ? "Sending…" : "Send link"}
         </Button>
       </div>
     );
@@ -295,10 +304,20 @@ function FollowUpDetail({
       <Button
         size="sm"
         className="w-full"
-        onClick={() => onSend(`Email sent to ${recipient}.`)}
+        disabled={pending}
+        onClick={() =>
+          dispatch({
+            prospectId: prospect.id,
+            type: "custom_email",
+            toEmail: recipient,
+            toName: prospect.name,
+            subject,
+            body,
+          })
+        }
       >
         <SendIcon />
-        Send email
+        {pending ? "Sending…" : "Send email"}
       </Button>
     </div>
   );

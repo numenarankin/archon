@@ -20,6 +20,7 @@ interface QueueDayColumnProps {
     placeAfter: boolean,
     day: WeekdayKey
   ) => void;
+  onPersist?: () => void;
 }
 
 export function QueueDayColumn({
@@ -27,6 +28,7 @@ export function QueueDayColumn({
   prospects,
   onDropToEnd,
   onReorder,
+  onPersist,
 }: QueueDayColumnProps) {
   const [{ isOver }, dropRef] = useDrop<QueueDragItem, unknown, { isOver: boolean }>(
     () => ({
@@ -57,7 +59,12 @@ export function QueueDayColumn({
         )}
       >
         {prospects.map((p) => (
-          <QueueCard key={p.id} prospect={p} onReorder={onReorder} />
+          <QueueCard
+            key={p.id}
+            prospect={p}
+            onReorder={onReorder}
+            onPersist={onPersist}
+          />
         ))}
         {prospects.length === 0 && (
           <p className="px-1 py-2 text-xs text-muted-foreground/70">No calls</p>

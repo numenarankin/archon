@@ -23,6 +23,7 @@ export interface QueueDragItem {
 export function QueueCard({
   prospect,
   onReorder,
+  onPersist,
 }: {
   prospect: Prospect;
   onReorder: (
@@ -31,6 +32,8 @@ export function QueueCard({
     placeAfter: boolean,
     day: WeekdayKey
   ) => void;
+  /** Save the board order once the drag ends. */
+  onPersist?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -42,9 +45,10 @@ export function QueueCard({
     () => ({
       type: QUEUE_DND_TYPE,
       item: { id: prospect.id, day: prospect.day },
+      end: () => onPersist?.(),
       collect: (monitor) => ({ isDragging: monitor.isDragging() }),
     }),
-    [prospect.id, prospect.day]
+    [prospect.id, prospect.day, onPersist]
   );
 
   const [, dropRef] = useDrop<QueueDragItem, { handled: boolean }, unknown>(

@@ -122,18 +122,33 @@ export interface GoogleCalendarEventInput {
   location: string;
   people: string[];
   description: string;
+  /** Attendee email addresses (invited + emailed when sendUpdates is on). */
+  attendeeEmails?: string[];
+  /** Request a Google Meet conference and return its link. */
+  addMeet?: boolean;
 }
 
 /** Build a Google event resource from the modal's fields. */
 function toGoogleEvent(input: GoogleCalendarEventInput): Record<string, unknown> {
+  const attendees = [
+    ...input.people.map((name) => ({ displayName: name })),
+    ...(input.attendeeEmails ?? []).map((email) => ({ email })),
+  ];
   const base: Record<string, unknown> = {
     summary: input.title || "Untitled event",
     location: input.location || undefined,
     description: input.description || undefined,
-    attendees: input.people.length
-      ? input.people.map((name) => ({ displayName: name }))
-      : undefined,
+    attendees: attendees.length ? attendees : undefined,
   };
+
+  if (input.addMeet) {
+    base.conferenceData = {
+      createRequest: {
+        requestId: crypto.randomUUID(),
+        conferenceSolutionKey: { type: "hangoutsMeet" },
+      },
+    };
+  }
 
   if (input.allDay) {
     // All-day end date is exclusive in the Google API, so add a day.
@@ -150,12 +165,21 @@ function toGoogleEvent(input: GoogleCalendarEventInput): Record<string, unknown>
   return base;
 }
 
-/** Create an event on the primary calendar. */
+/**
+ * Create an event on the primary calendar. Returns the new event id and, when a
+ * Meet conference was requested, its join link. `conferenceDataVersion=1` is
+ * required for Meet; `sendUpdates=all` makes Google email the invite.
+ */
 export async function createGoogleCalendarEvent(
   input: GoogleCalendarEventInput
-): Promise<void> {
+): Promise<{ id: string; hangoutLink: string | null }> {
   const token = await getGoogleAccessToken();
-  const res = await fetch(CALENDAR_API, {
+  const params = new URLSearchParams();
+  if (input.addMeet) params.set("conferenceDataVersion", "1");
+  if (input.attendeeEmails?.length) params.set("sendUpdates", "all");
+  const url = params.toString() ? `${CALENDAR_API}?${params}` : CALENDAR_API;
+
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
@@ -167,6 +191,17 @@ export async function createGoogleCalendarEvent(
     const detail = await res.text().catch(() => "");
     throw new Error(`Google Calendar create failed (${res.status}): ${detail}`);
   }
+  const data = (await res.json()) as {
+    id: string;
+    hangoutLink?: string;
+    conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] };
+  };
+  const meet =
+    data.hangoutLink ??
+    data.conferenceData?.entryPoints?.find((e) => e.entryPointType === "video")
+      ?.uri ??
+    null;
+  return { id: data.id, hangoutLink: meet };
 }
 
 /** Update an existing event by id (full patch of editable fields). */

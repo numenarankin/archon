@@ -23,19 +23,26 @@ import {
   type SalesConfig,
   type WeekdayKey,
 } from "@/lib/wildcat/sales";
+import { logCall, updateProspectStatus } from "@/lib/wildcat/sales-actions";
 
 export function DeskView({
   prospects,
   config,
   onChange,
+  onPersistQueue,
 }: {
   prospects: Prospect[];
   config: SalesConfig;
   onChange: Dispatch<SetStateAction<Prospect[]>>;
+  /** Persist the lineup order after a rail drag. */
+  onPersistQueue?: () => void;
 }) {
   const [day, setDay] = useState<WeekdayKey>("mon");
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [transcriptOpen, setTranscriptOpen] = useState(true);
+  // Notes for the active call, reset when the active prospect changes.
+  const [notes, setNotes] = useState("");
+  const [notesFor, setNotesFor] = useState<string | null>(null);
 
   const lineup = useMemo(
     () => prospects.filter((p) => p.day === day),
@@ -45,6 +52,12 @@ export function DeskView({
   // Resolve the active prospect, defaulting to the top of the lineup.
   const current = lineup.find((p) => p.id === currentId) ?? lineup[0] ?? null;
   const currentIndex = current ? lineup.findIndex((p) => p.id === current.id) : -1;
+
+  // Clear the notepad when moving to a different prospect (render-time adjust).
+  if (current && current.id !== notesFor) {
+    setNotesFor(current.id);
+    setNotes("");
+  }
 
   const goTo = useCallback(
     (index: number) => {
@@ -60,9 +73,31 @@ export function DeskView({
       onChange((prev) =>
         prev.map((p) => (p.id === current.id ? { ...p, status } : p))
       );
+      updateProspectStatus(current.id, status).catch((e) =>
+        console.error("Failed to save status", e)
+      );
     },
     [current, onChange]
   );
+
+  // "Log & next": persist the call (outcome + notes + transcript), mark the
+  // prospect called, then advance. Defaults a still-"new" call to no-answer.
+  const handleLogNext = useCallback(() => {
+    if (!current) return;
+    const outcome: CallStatus = current.status === "new" ? "no_answer" : current.status;
+    onChange((prev) =>
+      prev.map((p) => (p.id === current.id ? { ...p, status: outcome } : p))
+    );
+    logCall({
+      prospectId: current.id,
+      status: outcome,
+      notes,
+      durationSeconds: 0,
+      transcript: current.transcript,
+    }).catch((e) => console.error("Failed to log call", e));
+    setNotes("");
+    goTo(currentIndex + 1);
+  }, [current, notes, onChange, currentIndex, goTo]);
 
   // Reorder within the day's lineup (drag in the rail).
   const handleReorder = useCallback(
@@ -142,14 +177,17 @@ export function DeskView({
               currentId={current.id}
               onPick={setCurrentId}
               onReorder={handleReorder}
+              onPersist={onPersistQueue}
             />
             <CallCard
               prospect={current}
               script={renderTemplate(config.openingScript, current)}
               objections={config.objections}
               followUps={config.followUps}
+              notes={notes}
+              onNotesChange={setNotes}
               onStatusChange={handleStatusChange}
-              onLogNext={() => goTo(currentIndex + 1)}
+              onLogNext={handleLogNext}
             />
             <TranscriptPanel
               lines={current.transcript}

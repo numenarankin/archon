@@ -2,8 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { requireAdmin } from "@/lib/auth/permissions";
-import { getSessionUser } from "@/lib/auth/session";
+import { requireUser } from "@/lib/auth/session";
 
 /**
  * Save/disconnect Google Workspace credentials from the Settings UI. Admin-only
@@ -32,9 +31,7 @@ function refreshConsumers() {
 export async function saveGoogleWorkspaceSettings(
   input: SaveGoogleWorkspaceInput
 ): Promise<void> {
-  await requireAdmin();
-  const user = await getSessionUser();
-  if (!user) throw new Error("saveGoogleWorkspaceSettings: not signed in");
+  const user = await requireUser();
 
   const update: Record<string, string | null> = {
     owner_id: user.id,
@@ -59,9 +56,7 @@ export async function saveGoogleWorkspaceSettings(
 
 /** Clear all stored Google Workspace credentials. */
 export async function disconnectGoogleWorkspace(): Promise<void> {
-  await requireAdmin();
-  const user = await getSessionUser();
-  if (!user) throw new Error("disconnectGoogleWorkspace: not signed in");
+  const user = await requireUser();
   const { error } = await getSupabaseAdmin()
     .from("integration_settings")
     .upsert(

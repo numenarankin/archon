@@ -32,6 +32,7 @@ export const PERMISSION_KEYS = [
   "manage_accounting",
   "view_analytics",
   "view_pricing",
+  "view_prospects",
   "manage_skills",
 ] as const;
 
@@ -52,6 +53,7 @@ export type PermissionGroup =
   | "Accounting"
   | "Analytics"
   | "Pricing"
+  | "Prospecting"
   | "Skills";
 
 export interface PermissionDef {
@@ -210,6 +212,12 @@ export const PERMISSION_DEFS: readonly PermissionDef[] = [
     group: "Pricing",
   },
   {
+    key: "view_prospects",
+    label: "View prospects",
+    description: "View the prospecting pipeline and enriched contact lists (PII).",
+    group: "Prospecting",
+  },
+  {
     key: "manage_skills",
     label: "Manage skills",
     description: "View and configure Archon skills.",
@@ -240,6 +248,7 @@ export const PERMISSION_GROUP_ORDER: PermissionGroup[] = [
   "AI",
   "Analytics",
   "Pricing",
+  "Prospecting",
   "Skills",
 ];
 

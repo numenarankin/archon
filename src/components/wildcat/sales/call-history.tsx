@@ -22,6 +22,7 @@ import {
   type CallStatus,
   type FollowUpOption,
 } from "@/lib/wildcat/sales";
+import { updateCallStatus } from "@/lib/wildcat/sales-actions";
 
 export function CallHistory({
   records: initial,
@@ -54,6 +55,9 @@ export function CallHistory({
       prev.map((r) =>
         r.id === recordId ? { ...r, prospect: { ...r.prospect, status } } : r
       )
+    );
+    updateCallStatus(recordId, status).catch((e) =>
+      console.error("Failed to save call status", e)
     );
   }
 

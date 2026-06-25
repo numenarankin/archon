@@ -21,6 +21,8 @@ export function CallCard({
   script,
   objections,
   followUps,
+  notes,
+  onNotesChange,
   onStatusChange,
   onLogNext,
 }: {
@@ -29,6 +31,8 @@ export function CallCard({
   script: string;
   objections: Objection[];
   followUps: FollowUpOption[];
+  notes: string;
+  onNotesChange: (value: string) => void;
   onStatusChange: (status: CallStatus) => void;
   onLogNext: () => void;
 }) {
@@ -47,8 +51,7 @@ export function CallCard({
         </div>
         <div className="flex min-h-0 flex-1 flex-col">
           <Dossier prospect={prospect} />
-          {/* Keyed so the textarea clears when the rep moves to the next call. */}
-          <NotesPad key={prospect.id} />
+          <NotesPad value={notes} onChange={onNotesChange} />
         </div>
       </div>
     </div>

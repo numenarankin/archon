@@ -1,4 +1,5 @@
 import { getKpiDashboard } from "@/lib/numena/kpis";
+import { requirePermission } from "@/lib/auth/permissions";
 import { KpiStatCards } from "@/components/numena/kpis/kpi-stat-cards";
 import { DailyMetricsChart } from "@/components/numena/kpis/daily-metrics-chart";
 import { LifecycleChart } from "@/components/numena/kpis/lifecycle-chart";
@@ -22,6 +23,7 @@ const OFFERING_STAGE_META: Record<string, { label: string; color: string }> = {
 };
 
 export default async function NumenaKpisPage() {
+  await requirePermission("view_prospects");
   const data = await getKpiDashboard();
 
   return (
