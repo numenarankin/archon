@@ -1,20 +1,7 @@
-import {
-  getBusinessDevelopers,
-  getFilings,
-  getInvestors,
-} from "@/lib/numena/prospecting";
-import { ProspectingWorkspace } from "@/components/numena/prospecting-workspace";
-import { requirePermission } from "@/lib/auth/permissions";
+import { redirect } from "next/navigation";
 
-export default async function NumenaPage() {
-  await requirePermission("view_prospects");
-  const [filings, investors, bds] = await Promise.all([
-    getFilings(),
-    getInvestors(),
-    getBusinessDevelopers(),
-  ]);
-
-  return (
-    <ProspectingWorkspace filings={filings} investors={investors} bds={bds} />
-  );
+// Prospecting moved to /numena/prospecting. Redirect the old path so existing
+// links and bookmarks still resolve.
+export default function NumenaPage() {
+  redirect("/numena/prospecting");
 }

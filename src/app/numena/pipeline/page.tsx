@@ -1,10 +1,10 @@
-import { getDeals } from "@/lib/numena/pipeline";
+import { getPipelineData } from "@/lib/numena/pipeline-data";
 import { PipelineBoard } from "@/components/numena/pipeline-board";
 import { requirePermission } from "@/lib/auth/permissions";
 
 export default async function PipelinePage() {
   await requirePermission("view_pipeline");
-  const deals = await getDeals();
+  const { stages, deals } = await getPipelineData("numena");
 
-  return <PipelineBoard deals={deals} />;
+  return <PipelineBoard stages={stages} deals={deals} buKey="numena" />;
 }

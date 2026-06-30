@@ -30,11 +30,13 @@ export function OperatorDetailPanel({
   onClose,
   onSelectWell,
   onSelectPrincipal,
+  excludePlugged = false,
 }: {
   operatorNumber: number | null;
   onClose: () => void;
   onSelectWell: (api: number, lng: number | null, lat: number | null) => void;
   onSelectPrincipal: (name: string) => void;
+  excludePlugged?: boolean;
 }) {
   const [detail, setDetail] = useState<OperatorDetail | null>(null);
   const [leases, setLeases] = useState<OperatorLease[]>([]);
@@ -80,8 +82,16 @@ export function OperatorDetailPanel({
 
   const op = detail?.operator;
   const officers = detail?.officers ?? [];
-  const wells = detail?.wells ?? [];
-  const wellCount = detail?.wellCount ?? 0;
+  const allWells = detail?.wells ?? [];
+  const totalWellCount = detail?.wellCount ?? 0;
+  // True when the operator has more wells than were fetched (the list is a
+  // first-N sample). Used to caveat the active-only count below.
+  const capped = allWells.length < totalWellCount;
+  // When excluding plugged wells, drop them from the list and the count. The
+  // count is derived from the fetched wells, so for very large operators (where
+  // the list is capped) it reflects the fetched sample, like the existing list.
+  const wells = excludePlugged ? allWells.filter((w) => !w.is_plugged) : allWells;
+  const wellCount = excludePlugged ? wells.length : totalWellCount;
   const address = op
     ? [op.addr_line1, op.addr_line2, [op.city, op.state, op.zip || ""].filter(Boolean).join(" ")]
         .filter(Boolean)
@@ -186,9 +196,16 @@ export function OperatorDetailPanel({
 
               {tab === "wells" && (
                 <>
-                  {wells.length < wellCount && (
+                  {!excludePlugged && capped && (
                     <p className="mb-1 text-xs text-muted-foreground">
                       Showing first {wells.length.toLocaleString()}
+                    </p>
+                  )}
+                  {excludePlugged && capped && (
+                    <p className="mb-1 text-xs text-muted-foreground">
+                      Active wells among the first{" "}
+                      {allWells.length.toLocaleString()} of{" "}
+                      {totalWellCount.toLocaleString()}
                     </p>
                   )}
                   <ul className="flex flex-col divide-y rounded-md border">

@@ -11,7 +11,11 @@ import { NetworkScene } from "./network-scene";
 import { MapFilters, DEFAULT_FILTERS, type Filters, type MapMode } from "./map-filters";
 import { useMapAiContext } from "@/lib/ai/map-context";
 import { COUNTY_NAMES } from "@/lib/wells/counties";
-import { getFocusWells, loadOperatorPoints } from "@/lib/wells/queries";
+import {
+  getFocusWells,
+  loadOperatorPoints,
+  type OperatorPoint,
+} from "@/lib/wells/queries";
 
 const FOCUS_SOURCE = "focus-src";
 const OPERATOR_SOURCE = "operator-src";
@@ -63,8 +67,11 @@ const wellColor: Expr = [
 function wellsFilter(f: Filters): mapboxgl.FilterSpecification {
   const parts: unknown[] = ["all", ["!", ["has", "point_count"]]];
   if (f.oilGas !== "all") parts.push(["==", ["get", "og"], f.oilGas]);
-  if (f.plugged === "plugged") parts.push(["==", ["get", "plug"], 1]);
-  if (f.plugged === "active") parts.push(["==", ["get", "plug"], 0]);
+  // The global "exclude plugged" setting hides plugged wells everywhere; it
+  // takes precedence over the per-mode status control.
+  if (f.excludePlugged) parts.push(["==", ["get", "plug"], 0]);
+  else if (f.plugged === "plugged") parts.push(["==", ["get", "plug"], 1]);
+  else if (f.plugged === "active") parts.push(["==", ["get", "plug"], 0]);
   if (f.district !== "all") parts.push(["==", ["get", "dist"], f.district]);
   return parts as unknown as mapboxgl.FilterSpecification;
 }
@@ -83,6 +90,9 @@ export function WellsMap() {
   } | null>(null);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const prevModeRef = useRef<MapMode>("wells");
+  // Authoritative operator points (by number) for enriching cluster-leaf rows;
+  // cluster-leaf properties don't reliably carry every field.
+  const opPointsRef = useRef<Map<number, OperatorPoint>>(new Map());
 
   // Selecting a well from the operator panel jumps the map + well detail to it.
   const handleSelectWell = (api: number, lng: number | null, lat: number | null) => {
@@ -349,12 +359,22 @@ export function WellsMap() {
         if (err || !leaves) return;
         const items: OperatorListItem[] = leaves.map((l) => {
           const p = (l.properties ?? {}) as Record<string, unknown>;
+          const n = Number(p.n);
+          // Counts come from the authoritative operator cache; the displayed `w`
+          // stays the effective (toggle-aware) value shown on the map.
+          const op = opPointsRef.current.get(n);
+          const wt = op?.w ?? Number(p.wt ?? p.w ?? 0);
+          const wa = op?.wa ?? op?.w ?? Number(p.wa ?? p.w ?? 0);
           return {
-            n: Number(p.n),
-            nm: String(p.nm ?? ""),
-            c: String(p.c ?? ""),
-            s: String(p.s ?? ""),
-            w: Number(p.w ?? 0),
+            n,
+            nm: String(p.nm ?? op?.nm ?? ""),
+            a: String(p.a ?? op?.a ?? ""),
+            c: String(p.c ?? op?.c ?? ""),
+            s: String(p.s ?? op?.s ?? ""),
+            z: Number(p.z ?? op?.z ?? 0),
+            w: Number(p.w ?? wt),
+            wt,
+            wa,
           };
         });
         const first = items[0];
@@ -435,6 +455,7 @@ export function WellsMap() {
           ? "all"
           : COUNTY_NAMES[filters.county] ?? String(filters.county),
       operator: filters.operator?.operator_name ?? null,
+      excludePlugged: filters.excludePlugged,
     });
   }, [filters]);
 
@@ -467,17 +488,36 @@ export function WellsMap() {
       loadOperatorPoints()
         .then((all) => {
           if (cancelled || !mapRef.current) return;
+          opPointsRef.current = new Map(all.map((o) => [o.n, o]));
           const src = map.getSource(OPERATOR_SOURCE) as mapboxgl.GeoJSONSource | undefined;
           if (!src) return;
           const lo = filters.minWells ?? 0;
           const hi = filters.maxWells ?? Infinity;
-          const pts = all.filter((o) => o.w >= lo && o.w <= hi);
+          // Effective well count: drop plugged wells when the global setting is on
+          // (falls back to the all-wells count if the active count isn't present).
+          const wc = (o: typeof all[number]) =>
+            filters.excludePlugged ? o.wa ?? o.w : o.w;
+          const pts = all.filter((o) => {
+            const w = wc(o);
+            if (filters.excludePlugged && w === 0) return false;
+            return w >= lo && w <= hi;
+          });
           src.setData({
             type: "FeatureCollection" as const,
             features: pts.map((o) => ({
               type: "Feature" as const,
               geometry: { type: "Point" as const, coordinates: [o.lng, o.lat] },
-              properties: { n: o.n, nm: o.nm, a: o.a, c: o.c, s: o.s, z: o.z, w: o.w },
+              properties: {
+                n: o.n,
+                nm: o.nm,
+                a: o.a,
+                c: o.c,
+                s: o.s,
+                z: o.z,
+                w: wc(o),
+                wt: o.w,
+                wa: o.wa ?? o.w,
+              },
             })),
           });
           if (entering) map.fitBounds(TEXAS_BOUNDS, { padding: 24, duration: 600 });
@@ -513,7 +553,11 @@ export function WellsMap() {
       operatorNumber: filters.operator?.operator_number ?? null,
       countyCode: filters.county === "all" ? null : filters.county,
       oilGas: filters.oilGas === "all" ? null : filters.oilGas,
-      plugged: filters.plugged === "all" ? null : filters.plugged === "plugged",
+      plugged: filters.excludePlugged
+        ? false
+        : filters.plugged === "all"
+          ? null
+          : filters.plugged === "plugged",
       district: filters.district === "all" ? null : filters.district,
     })
       .then(({ wells }) => {
@@ -591,6 +635,7 @@ export function WellsMap() {
             operators={operatorList.items}
             onClose={() => setOperatorList(null)}
             onSelectOperator={setSelectedOperator}
+            excludePlugged={filters.excludePlugged}
           />
         )}
         <OperatorDetailPanel
@@ -598,6 +643,7 @@ export function WellsMap() {
           onClose={() => setSelectedOperator(null)}
           onSelectWell={handleSelectWell}
           onSelectPrincipal={setSelectedPrincipal}
+          excludePlugged={filters.excludePlugged}
         />
         <PrincipalDetailPanel
           name={selectedPrincipal}

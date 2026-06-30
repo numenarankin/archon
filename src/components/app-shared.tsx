@@ -92,8 +92,14 @@ export const navGroups: SidebarNavGroup[] = [
 		items: [
 			{
 				title: "Prospecting",
-				path: "/numena",
+				path: "/numena/prospecting",
 				icon: <GemIcon />,
+				permission: "view_prospects",
+			},
+			{
+				title: "Sales",
+				path: "/numena/sales",
+				icon: <HandshakeIcon />,
 				permission: "view_prospects",
 			},
 			{
@@ -119,6 +125,12 @@ export const navGroups: SidebarNavGroup[] = [
 	{
 		label: "Wildcat",
 		items: [
+			{
+				title: "Prospecting",
+				path: "/wildcat/prospecting",
+				icon: <GemIcon />,
+				permission: "view_map",
+			},
 			{
 				title: "Pipeline",
 				path: "/wildcat/pipeline",

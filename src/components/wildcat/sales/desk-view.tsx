@@ -9,12 +9,20 @@ import {
 } from "react";
 import { DndProvider } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
-import { ChevronLeftIcon, ChevronRightIcon, PhoneCallIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  MicOffIcon,
+  PhoneCallIcon,
+  PhoneOffIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/numena/kpis/segmented";
 import { LineupRail } from "@/components/wildcat/sales/lineup-rail";
 import { CallCard } from "@/components/wildcat/sales/call-card";
 import { TranscriptPanel } from "@/components/wildcat/sales/transcript-panel";
+import { useTelnyxDialer } from "@/components/wildcat/sales/use-telnyx-dialer";
+import { useCallTranscript } from "@/components/wildcat/sales/use-call-transcript";
 import {
   renderTemplate,
   WEEKDAYS,
@@ -30,14 +38,27 @@ export function DeskView({
   config,
   onChange,
   onPersistQueue,
+  telephonyEnabled = false,
 }: {
   prospects: Prospect[];
   config: SalesConfig;
   onChange: Dispatch<SetStateAction<Prospect[]>>;
   /** Persist the lineup order after a rail drag. */
   onPersistQueue?: () => void;
+  /** Whether Telnyx is configured on the server (enables the live dialer). */
+  telephonyEnabled?: boolean;
 }) {
-  const [day, setDay] = useState<WeekdayKey>("mon");
+  const {
+    state: callState,
+    muted: dialMuted,
+    error: dialError,
+    callId: liveCallId,
+    audioRef,
+    dial,
+    hangup,
+    toggleMute,
+  } = useTelnyxDialer();
+  const [day, setDay] = useState<WeekdayKey>("unscheduled");
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [transcriptOpen, setTranscriptOpen] = useState(true);
   // Notes for the active call, reset when the active prospect changes.
@@ -119,8 +140,16 @@ export function DeskView({
     [onChange]
   );
 
+  // While a call is live, the transcript comes from Supabase Realtime; otherwise
+  // show whatever the prospect record carries (empty for a fresh DB prospect).
+  const onCall =
+    liveCallId !== null && (callState === "ringing" || callState === "active");
+  const liveLines = useCallTranscript(onCall ? liveCallId : null);
+  const dialing = callState === "connecting";
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <audio ref={audioRef} autoPlay hidden />
       <div className="flex shrink-0 flex-wrap items-center gap-3">
         <Segmented
           options={WEEKDAYS.map((d) => ({ value: d.key, label: d.short }))}
@@ -162,12 +191,40 @@ export function DeskView({
           >
             <ChevronRightIcon />
           </Button>
-          <Button size="sm" disabled={!current}>
-            <PhoneCallIcon />
-            Dial
-          </Button>
+          {onCall ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                aria-pressed={dialMuted}
+                onClick={toggleMute}
+              >
+                <MicOffIcon />
+                {dialMuted ? "Unmute" : "Mute"}
+              </Button>
+              <Button variant="destructive" size="sm" onClick={hangup}>
+                <PhoneOffIcon />
+                Hang up
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="sm"
+              disabled={!current || !telephonyEnabled || dialing}
+              title={telephonyEnabled ? undefined : "Telnyx is not configured"}
+              onClick={() =>
+                current && dial({ id: current.id, phone: current.phone })
+              }
+            >
+              <PhoneCallIcon />
+              {dialing ? "Connecting…" : "Dial"}
+            </Button>
+          )}
         </div>
       </div>
+      {dialError && (
+        <p className="shrink-0 text-xs text-destructive">{dialError}</p>
+      )}
 
       {current ? (
         <DndProvider backend={HTML5Backend}>
@@ -190,9 +247,10 @@ export function DeskView({
               onLogNext={handleLogNext}
             />
             <TranscriptPanel
-              lines={current.transcript}
+              lines={onCall ? liveLines : current.transcript}
               open={transcriptOpen}
               onToggle={() => setTranscriptOpen((v) => !v)}
+              live={onCall}
             />
           </div>
         </DndProvider>

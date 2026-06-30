@@ -7,6 +7,8 @@ import {
   hasGoogleCalendar,
 } from "@/lib/calendar/google-calendar";
 import { sendMessage } from "@/lib/email/actions";
+import { areaCodeOf, pickOutboundNumber } from "@/lib/wildcat/outbound";
+import { encodeClientState } from "@/lib/wildcat/telephony/telnyx";
 import {
   numFromDayKey,
   type CallStatus,
@@ -30,6 +32,7 @@ function isUuid(id: string): boolean {
 
 function revalidate(): void {
   revalidatePath("/wildcat/sales");
+  revalidatePath("/numena/sales");
 }
 
 export interface QueueOrderItem {
@@ -120,6 +123,69 @@ export async function logCall(input: LogCallInput): Promise<{ callId: string } |
 
   revalidate();
   return { callId };
+}
+
+export interface StartCallResult {
+  ok: boolean;
+  callId?: string;
+  callerNumber?: string;
+  destinationNumber?: string;
+  clientState?: string;
+  error?: string;
+}
+
+/**
+ * Begin a call: select a local-presence outbound number, create the
+ * `sales_calls` row, and return what the browser dialer needs for `newCall`
+ * (caller id, destination, and the base64 client_state that ties the Telnyx leg
+ * back to this call row on webhooks).
+ */
+export async function startCall(input: {
+  prospectId: string;
+  phone: string;
+}): Promise<StartCallResult> {
+  try {
+    const sb = await getSupabaseServer();
+    const { data: nums, error: numErr } = await sb
+      .from("sales_outbound_numbers")
+      .select("e164, area_code, region, active");
+    if (numErr) throw new Error(numErr.message);
+    const numbers = (nums ?? []).map(
+      (n: { e164: string; area_code: string; region: string | null; active: boolean }) => ({
+        e164: n.e164,
+        areaCode: n.area_code,
+        region: n.region ?? undefined,
+        active: n.active,
+      })
+    );
+    const pick = pickOutboundNumber(areaCodeOf(input.phone), numbers);
+    if (!pick) return { ok: false, error: "No outbound numbers configured." };
+
+    const { data, error } = await sb
+      .from("sales_calls")
+      .insert({
+        prospect_id: isUuid(input.prospectId) ? input.prospectId : null,
+        outbound_number: pick.e164,
+      })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    const callId = (data as { id: string }).id;
+
+    revalidate();
+    return {
+      ok: true,
+      callId,
+      callerNumber: pick.e164,
+      destinationNumber: input.phone,
+      clientState: encodeClientState({ callId }),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not start the call.",
+    };
+  }
 }
 
 /** Change the logged outcome on a past call (History tab). */

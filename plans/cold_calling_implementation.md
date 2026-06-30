@@ -1,4 +1,4 @@
-Phone numbers for outbound calling acquired via Plivo. App should automatically select the number which is closest to the area code of the target. We already have ElevenLabs implemented for the speech features so we can easily transcribe both the user and the counterparty channels for call transcription.
+Phone numbers for outbound calling acquired via Telnyx, and we build our own in-app dialer on Telnyx's WebRTC SDK. App should automatically select the number which is closest to the area code of the target. Both channels (rep + counterparty) are transcribed live via Telnyx's built-in real-time transcription (Call Control). The `call.transcription` webhook carries no per-line track, so rep vs prospect is labeled by running two `client_state`-tagged transcriptions (inbound + outbound); ElevenLabs is not used on the call leg. Telephony specifics live in [telnyx_dialer.md](./telnyx_dialer.md).
 
 Script and objections handled in supabase. Queue as an ordered list by day in supabase. Call transcripts and notes stored in supabase. Need to store all call metadata such as time, status, etc.
 
@@ -27,7 +27,7 @@ Supabase (Postgres + RLS)        Telephony provider boundary (TBD)
    - follow_ups / outbound_numbers
 ```
 
-The telephony provider (Plivo) sits behind an interface so the rest of the app does not depend on it. Plivo approval is pending, so Phase 3 below is the only part blocked on it. Phases 1 and 2 deliver a fully usable, Supabase-backed desk with manual call logging and working follow-ups.
+The telephony provider (Telnyx) sits behind an interface so the rest of the app does not depend on it. Phase 3 below is the live-calling slice (see [telnyx_dialer.md](./telnyx_dialer.md)). Phases 1 and 2 deliver a fully usable, Supabase-backed desk with manual call logging and working follow-ups, independent of telephony.
 
 ## Data model (Supabase)
 
@@ -115,7 +115,7 @@ create table calls (
   workspace_id     uuid not null references workspaces (id) on delete cascade,
   prospect_id      uuid references sales_prospects (id) on delete set null,
   outbound_number  text,                         -- the local number dialed from
-  provider_call_id text,                         -- Plivo call uuid (Phase 3)
+  provider_call_id text,                         -- Telnyx call_control_id (Phase 3)
   status           call_status,                  -- outcome logged by the rep
   started_at       timestamptz,
   ended_at         timestamptz,
@@ -175,7 +175,7 @@ create table outbound_numbers (
   e164        text not null,
   area_code   text not null,
   region      text,                              -- "Midland, TX" label
-  provider    text not null default 'plivo',
+  provider    text not null default 'telnyx',
   active      boolean not null default true,
   created_at  timestamptz not null default now(),
   unique (workspace_id, e164)
@@ -198,7 +198,7 @@ Repeat for every table above.
 
 ## Outbound number selection (area-code proximity)
 
-Goal: dial from the owned number closest to the prospect's area code so the call shows as local. This needs no Plivo specifics, only the selection logic.
+Goal: dial from the owned number closest to the prospect's area code so the call shows as local. This needs no provider specifics, only the selection logic; the chosen number becomes the Telnyx `callerNumber`.
 
 1. Derive `area_code` for each prospect (parse from `phone`, or geocode from `location`).
 2. Maintain a static NANP table mapping `area_code -> { lat, lng, state }` (ship as a JSON asset under `src/lib/wildcat/area-codes.json`; the NANPA list is public).
@@ -229,9 +229,11 @@ Replace the mock functions in `src/lib/wildcat/sales.ts` with `"use server"` act
 
 Live transcript on the Desk should use a Supabase Realtime subscription on `call_transcript_lines` filtered by `call_id`, so the panel updates as rows are inserted. `TranscriptPanel` already accepts a `lines` array; feed it from the subscription with `live={true}`.
 
-## Telephony provider boundary (Phase 3, pending Plivo)
+## Telephony provider boundary (Phase 3, Telnyx)
 
-Define an interface so Plivo is swappable and the desk does not import it directly:
+Full Telnyx spec (WebRTC dialer, transcription, webhooks, env): [telnyx_dialer.md](./telnyx_dialer.md).
+
+Define an interface so the provider is swappable and the desk does not import it directly:
 
 ```ts
 // src/lib/wildcat/telephony/provider.ts
@@ -243,13 +245,13 @@ export interface TelephonyProvider {
 }
 ```
 
-The exact Plivo media-stream to ElevenLabs wiring is intentionally left open until Plivo approval. Until then, `startCall` can run in a "manual" mode (no real dial), and the rep logs the outcome by hand. Numbers are still acquired and selected per the section above once available.
+For Telnyx, `placeCall` is mostly the browser-side `newCall` from the WebRTC SDK, and transcript lines arrive via the Call Control webhook (`call.transcription`) rather than an out-of-band bridge. Until the dialer is built, `startCall` runs in a "manual" mode (no real dial) and the rep logs the outcome by hand. See [telnyx_dialer.md](./telnyx_dialer.md) for the concrete API calls.
 
 ## Phasing
 
 - **Phase 1 (no telephony): Supabase data layer.** Add the migration, seed config defaults, and replace the mock functions in `sales.ts` with real queries. The four tabs work on real data; calls are logged manually via "Log & next". Deliverable: a usable CRM desk.
 - **Phase 2: Follow-ups.** Wire `scheduleFollowUp` to Google Calendar + Meet (next section) and email. Persist `follow_ups` rows; surface scheduled items on the prospect.
-- **Phase 3 (blocked on Plivo): live calling + transcription.** Implement `TelephonyProvider` for Plivo, bridge dual-channel audio to ElevenLabs, stream lines into `call_transcript_lines`, and switch the Desk transcript to the Realtime subscription.
+- **Phase 3: live calling + transcription (Telnyx).** Build the WebRTC dialer (browser `newCall` with call parking so the call surfaces in Call Control), start two `client_state`-tagged Deepgram transcriptions (inbound + outbound), insert `call.transcription` webhooks into `sales_call_lines`, and switch the Desk transcript to a Supabase Realtime subscription. Details in [telnyx_dialer.md](./telnyx_dialer.md).
 
 ## Permissions
 

@@ -31,15 +31,23 @@ def main() -> int:
         "create or replace view ziploc as select lpad(ZIP,5,'0') zip, "
         f"LAT::double lat, LNG::double lng from read_csv('{ZIP_CSV.as_posix()}', header=true)"
     )
+    # Total wells and active (non-plugged) wells per operator. is_plugged lives
+    # on well_summary; left join so operators with wells missing from the summary
+    # still count toward the total.
     con.execute(
         "create or replace temp view opcount as "
-        "select operator_number, count(*) wells from well_operator group by 1"
+        "select wo.operator_number, "
+        "       count(*) wells, "
+        "       count(*) filter (where not coalesce(ws.is_plugged, false)) wells_active "
+        "from well_operator wo "
+        "left join well_summary ws using (api_number) "
+        "group by 1"
     )
     rows = con.sql(
         """
         select o.operator_number opnum, o.operator_name opname,
                o.addr_line1 addr, o.city, o.state, o.zip,
-               z.lng, z.lat, c.wells
+               z.lng, z.lat, c.wells, c.wells_active
         from operators o
         join opcount c on c.operator_number = o.operator_number
         join ziploc z on z.zip = lpad(o.zip::varchar, 5, '0')
@@ -62,6 +70,7 @@ def main() -> int:
             "lng": round(float(rows["lng"][i]), 5),
             "lat": round(float(rows["lat"][i]), 5),
             "w": int(rows["wells"][i]),
+            "wa": int(rows["wells_active"][i]),
         })
     OUT.write_text(json.dumps(out, separators=(",", ":")))
     print(f"wrote {n:,} operator points to {OUT} "

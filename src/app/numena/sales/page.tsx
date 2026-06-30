@@ -7,11 +7,16 @@ import {
 import { hasTelnyx } from "@/lib/wildcat/telephony/telnyx";
 import { SalesWorkspace } from "@/components/wildcat/sales/sales-workspace";
 
-export default async function SalesPage() {
-  await requirePermission("view_sales");
+/**
+ * The Numena sales desk — the same workspace as /wildcat/sales, scoped to the
+ * Numena business unit. Issuers added from the prospecting page land here in the
+ * Unscheduled column. Gated by the Prospecting page capability.
+ */
+export default async function NumenaSalesPage() {
+  await requirePermission("view_prospects");
   const [prospects, history, config] = await Promise.all([
-    getQueue("wildcat"),
-    getCallHistory("wildcat"),
+    getQueue("numena"),
+    getCallHistory("numena"),
     getSalesConfig(),
   ]);
 

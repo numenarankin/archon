@@ -24,6 +24,7 @@ export interface MapFilterContext {
   district: string; // "all" or a number
   county: string; // county name or "all"
   operator: string | null;
+  excludePlugged: boolean; // global setting: plugged wells hidden + uncounted
 }
 
 interface MapAiState {

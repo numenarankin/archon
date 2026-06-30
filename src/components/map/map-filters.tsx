@@ -1,9 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -35,6 +44,9 @@ export interface Filters {
   networkColor: ColorMode;
   networkPerson: string | null;
   networkMinWells: number;
+  // Global setting (applies across all modes): when true, plugged wells are
+  // hidden from the map and dropped from well counts and well-count filters.
+  excludePlugged: boolean;
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -50,6 +62,7 @@ export const DEFAULT_FILTERS: Filters = {
   networkColor: "type",
   networkPerson: null,
   networkMinWells: 20,
+  excludePlugged: false,
 };
 
 const DISTRICTS = Array.from({ length: 14 }, (_, i) => i + 1);
@@ -132,7 +145,36 @@ export function MapFilters({
 
   return (
     <div className="absolute left-3 top-3 z-10 flex w-64 flex-col gap-3 rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur">
-      <div className="font-heading text-sm font-semibold">Map</div>
+      <div className="flex items-center justify-between">
+        <div className="font-heading text-sm font-semibold">Map</div>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Map settings"
+                className="-my-1 -mr-1"
+              />
+            }
+          >
+            <Settings className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Map settings</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem
+                checked={filters.excludePlugged}
+                onCheckedChange={(v) => set({ excludePlugged: v })}
+                closeOnClick={false}
+              >
+                Exclude plugged wells
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       <Field label="Show">
         <Seg

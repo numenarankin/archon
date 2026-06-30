@@ -12,11 +12,10 @@ import {
 } from "@/components/ui/select";
 import { SwipeUpModal } from "@/components/wells/swipe-up-modal";
 import {
-  PIPELINE_STAGES,
   DEAL_OWNERS,
   UNOWNED,
   type Deal,
-  type DealStage,
+  type PipelineStage,
 } from "@/lib/numena/pipeline";
 
 export type NewDeal = Omit<Deal, "id">;
@@ -60,10 +59,12 @@ interface DealModalProps {
   mode: "add" | "edit";
   onClose: () => void;
   onSubmit: (deal: NewDeal) => void;
+  /** The pipeline's stages, for the Stage dropdown. */
+  stages: PipelineStage[];
   /** Existing deal to seed the form from in "edit" mode. */
   deal?: Deal | null;
-  /** Default stage for a newly added deal. */
-  defaultStage?: DealStage;
+  /** Default stage id for a newly added deal (defaults to the first stage). */
+  defaultStageId?: string;
 }
 
 /**
@@ -75,13 +76,15 @@ export function DealModal({
   mode,
   onClose,
   onSubmit,
+  stages,
   deal,
-  defaultStage = "lead",
+  defaultStageId,
 }: DealModalProps) {
+  const fallbackStageId = defaultStageId ?? stages[0]?.id ?? "";
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
   const [value, setValue] = useState("");
-  const [stage, setStage] = useState<DealStage>(defaultStage);
+  const [stage, setStage] = useState<string>(fallbackStageId);
   const [owner, setOwner] = useState<string>(UNOWNED);
   const [closeDate, setCloseDate] = useState("");
   const [probability, setProbability] = useState("");
@@ -93,12 +96,12 @@ export function DealModal({
     setName(deal?.name ?? "");
     setCompany(deal?.company ?? "");
     setValue(deal?.value != null ? String(deal.value) : "");
-    setStage(deal?.stage ?? defaultStage);
+    setStage(deal?.stageId ?? fallbackStageId);
     setOwner(deal?.owner ?? UNOWNED);
     setCloseDate(deal?.closeDate ?? "");
     setProbability(deal?.probability != null ? String(deal.probability) : "");
     setNote(deal?.note ?? "");
-  }, [open, deal, defaultStage]);
+  }, [open, deal, fallbackStageId]);
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -110,7 +113,7 @@ export function DealModal({
       name: trimmedName,
       company: company.trim(),
       value: Number.isNaN(valueNum) ? 0 : valueNum,
-      stage,
+      stageId: stage,
       owner: owner === UNOWNED ? undefined : owner,
       closeDate: closeDate || undefined,
       probability: probNum != null && !Number.isNaN(probNum) ? probNum : undefined,
@@ -182,14 +185,14 @@ export function DealModal({
               <span className="text-sm font-medium">Stage</span>
               <Select
                 value={stage}
-                onValueChange={(v) => setStage((v ?? "lead") as DealStage)}
+                onValueChange={(v) => v && setStage(v)}
               >
                 <SelectTrigger className="h-11 w-full">
                   <SelectValue placeholder="Stage" />
                 </SelectTrigger>
                 <SelectContent>
-                  {PIPELINE_STAGES.map((s) => (
-                    <SelectItem key={s.stage} value={s.stage}>
+                  {stages.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
                       {s.label}
                     </SelectItem>
                   ))}

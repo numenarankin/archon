@@ -78,7 +78,7 @@ create table sales_calls (
                      references workspaces (id) on delete cascade,
   prospect_id      uuid references sales_prospects (id) on delete set null,
   outbound_number  text,                         -- local number dialed from
-  provider_call_id text,                         -- Plivo call uuid (Phase 3)
+  provider_call_id text,                         -- Telnyx call_control_id (Phase 3)
   status           call_status,                  -- outcome logged by the rep
   started_at       timestamptz not null default now(),
   ended_at         timestamptz,
@@ -158,7 +158,7 @@ create table sales_outbound_numbers (
   e164         text not null,
   area_code    text not null,
   region       text,
-  provider     text not null default 'plivo',
+  provider     text not null default 'telnyx',
   active       boolean not null default true,
   created_at   timestamptz not null default now(),
   unique (workspace_id, e164)
@@ -169,3 +169,6 @@ create policy sales_outbound_numbers_rw on sales_outbound_numbers
   for all to authenticated
   using (workspace_id in (select app_workspace_ids()))
   with check (workspace_id in (select app_workspace_ids()));
+
+-- Realtime: the Desk live transcript subscribes to transcript-line inserts.
+alter publication supabase_realtime add table sales_call_lines;

@@ -84,7 +84,8 @@ export interface OperatorPoint {
   z: number; // zip
   lng: number;
   lat: number;
-  w: number; // well count
+  w: number; // well count (all wells)
+  wa?: number; // active (non-plugged) well count; absent in older data files
 }
 
 let operatorsCache: OperatorPoint[] | null = null;
@@ -289,6 +290,48 @@ export async function getOperatorsLast12(
     | { operator_no: number; oil_last12: number; gas_last12: number }[]
     | null) ?? []) {
     m.set(r.operator_no, { oil: r.oil_last12 ?? 0, gas: r.gas_last12 ?? 0 });
+  }
+  return m;
+}
+
+/** P-5 master fields for a set of operators (for the cluster CSV export). */
+export interface OperatorP5 {
+  operator_number: number;
+  p5_status: string | null;
+  last_p5_date: number | null;
+  phone: number | null;
+  addr_line1: string | null;
+  addr_line2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: number | null;
+  zip_suffix: number | null;
+  oil_gatherer: string | null;
+  gas_gatherer: string | null;
+}
+
+/**
+ * P-5 master record for a set of operators, keyed by operator number. Chunked so
+ * the `in(...)` list stays well under PostgREST's URL/row limits.
+ */
+export async function getOperatorsP5(
+  operatorNumbers: number[],
+): Promise<Map<number, OperatorP5>> {
+  const m = new Map<number, OperatorP5>();
+  if (operatorNumbers.length === 0) return m;
+  const sb = getSupabaseBrowser();
+  const select =
+    "operator_number,p5_status,last_p5_date,phone,addr_line1,addr_line2,city,state,zip,zip_suffix,oil_gatherer,gas_gatherer";
+  for (let i = 0; i < operatorNumbers.length; i += 300) {
+    const chunk = operatorNumbers.slice(i, i + 300);
+    const { data, error } = await sb
+      .from("operators")
+      .select(select)
+      .in("operator_number", chunk);
+    if (error) throw new Error(`getOperatorsP5: ${error.message}`);
+    for (const r of (data as OperatorP5[] | null) ?? []) {
+      m.set(r.operator_number, r);
+    }
   }
   return m;
 }

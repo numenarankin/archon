@@ -35,10 +35,12 @@ export function SalesWorkspace({
   prospects: initial,
   history,
   config: initialConfig,
+  telephonyEnabled = false,
 }: {
   prospects: Prospect[];
   history: CallRecord[];
   config: SalesConfig;
+  telephonyEnabled?: boolean;
 }) {
   const [tab, setTab] = useState<SalesTab>("queue");
   // The lineup is shared: reordering in the Queue changes the dial order on the
@@ -150,6 +152,7 @@ export function SalesWorkspace({
           config={config}
           onChange={setProspects}
           onPersistQueue={persistQueue}
+          telephonyEnabled={telephonyEnabled}
         />
       )}
       {tab === "history" && (

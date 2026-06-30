@@ -33,6 +33,7 @@
     "@stripe/react-stripe-js": "^6.6.0",
     "@stripe/stripe-js": "^9.8.0",
     "@supabase/ssr": "^0.12.0",
+    "@telnyx/webrtc": "^2.27.1",
     "@supabase/supabase-js": "^2.108.1",
     "@tiptap/extension-link": "^3.26.1",
     "@tiptap/extension-placeholder": "^3.26.1",

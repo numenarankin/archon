@@ -8,7 +8,7 @@ import {
   DEAL_DND_TYPE,
   type DealDragItem,
 } from "@/components/numena/deal-card";
-import type { Deal, PipelineStageDef } from "@/lib/numena/pipeline";
+import type { Deal, PipelineStage } from "@/lib/numena/pipeline";
 
 const totalFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -23,9 +23,9 @@ export function PipelineColumn({
   onDropDeal,
   onOpenDeal,
 }: {
-  column: PipelineStageDef;
+  column: PipelineStage;
   deals: Deal[];
-  onDropDeal: (dealId: string, stage: PipelineStageDef["stage"]) => void;
+  onDropDeal: (dealId: string, stageId: string) => void;
   onOpenDeal: (deal: Deal) => void;
 }) {
   const [{ isOver }, dropRef] = useDrop<
@@ -35,10 +35,10 @@ export function PipelineColumn({
   >(
     () => ({
       accept: DEAL_DND_TYPE,
-      drop: (item) => onDropDeal(item.id, column.stage),
+      drop: (item) => onDropDeal(item.id, column.id),
       collect: (monitor) => ({ isOver: monitor.isOver() }),
     }),
-    [column.stage, onDropDeal]
+    [column.id, onDropDeal]
   );
 
   const total = deals.reduce((sum, d) => sum + d.value, 0);

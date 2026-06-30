@@ -105,6 +105,7 @@ function buildMapContext(): string {
     if (filters.district !== "all") active.push(`district ${filters.district}`);
     if (filters.county !== "all") active.push(`${filters.county} County`);
     if (filters.operator) active.push(`operator highlighted: ${filters.operator}`);
+    if (filters.excludePlugged) active.push("plugged wells excluded (hidden and uncounted)");
     lines.push(
       active.length
         ? `Active map filters: ${active.join("; ")}.`

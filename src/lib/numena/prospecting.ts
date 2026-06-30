@@ -11,6 +11,46 @@ import { getProspectingClient } from "@/lib/numena/prospecting-supabase";
 /** The prospecting categories shown on the Numena page. */
 export type ProspectingCategory = "filings" | "investors" | "bds";
 
+/** An officer / director / promoter named on a filing. */
+export interface IssuerPerson {
+  name: string;
+  /** Roles, e.g. ["Executive Officer", "Director"]. */
+  relationships: string[];
+  /** "City, ST" when available. */
+  location: string;
+}
+
+/**
+ * Everything we hold on a single filing's issuer — assembled on demand from
+ * `form_d_issuers`, `form_d_offerings`, and `form_d_related_persons` for the
+ * issuer profile modal.
+ */
+export interface IssuerProfile {
+  accessionNo: string;
+  // ── Issuer (form_d_issuers, primary issuer) ──
+  name: string;
+  cik: string | null;
+  jurisdiction: string | null;
+  entityType: string | null;
+  yearOfInception: number | null;
+  /** Assembled "street, city, ST zip". */
+  address: string | null;
+  phone: string | null;
+  // ── Offering (form_d_offerings) ──
+  industry: string | null;
+  exemption: string;
+  totalOffering: number | null;
+  totalSold: number | null;
+  totalRemaining: number | null;
+  minInvestment: number | null;
+  securitiesTypes: string[];
+  dateFirstSale: string | null;
+  numTotalInvestors: number | null;
+  numNonAccred: number | null;
+  // ── People (form_d_related_persons) ──
+  people: IssuerPerson[];
+}
+
 /** A single Form D filing, one row per filing event. */
 export interface Filing {
   /** SEC accession number — unique per filing. */
@@ -136,16 +176,113 @@ export interface Investor {
   status: "Active" | "Inactive" | "Suspended";
 }
 
-/** A business development contact / referral source. */
+/**
+ * A business developer prospect — a placement agent / broker-dealer that has
+ * acted as a sales-compensation recipient on Form D deals. Sourced from the
+ * `v_bd_prospects` rollup (FINRA firm profile + Form D deal activity).
+ */
 export interface BusinessDeveloper {
+  /** Resolved firm id (firm_master.firm_id). */
   id: string;
   name: string;
-  company: string;
-  /** Coverage region. */
-  region: string;
-  phone: string;
-  email: string;
-  status: "Active" | "Inactive" | "Suspended";
+  /** CRD number, when the firm is FINRA-registered. */
+  crd: string | null;
+  /** Main office "City, ST" (or country), for display. */
+  location: string;
+  /** Form D deals placed in the trailing 24 months. */
+  deals24mo: number;
+  /** Of those, deals claiming the 506(c) exemption. */
+  deals506c24mo: number;
+  /** Sum of offering sizes on those deals, in USD (a deal-flow proxy). */
+  capitalPlaced24mo: number | null;
+  /** Deals placed in the trailing 90 days — the recent-activity signal. */
+  deals90d: number;
+  /** ISO date of the firm's most recent deal, if any. */
+  lastDealAt: string | null;
+}
+
+/** Shape of a row from the `v_bd_prospects` view in numena-data. */
+interface BdProspectRow {
+  firm_id: string;
+  name: string | null;
+  crd: string | null;
+  main_office_city: string | null;
+  main_office_state: string | null;
+  main_office_country: string | null;
+  deals_24mo: number | null;
+  deals_506c_24mo: number | null;
+  capital_placed_24mo: number | null;
+  deals_90d: number | null;
+  last_deal_at: string | null;
+}
+
+/** "City, ST", falling back to country, then an em-dash-free placeholder. */
+function bdLocation(row: BdProspectRow): string {
+  const city = row.main_office_city?.trim();
+  const state = row.main_office_state?.trim();
+  if (city && state) return `${city}, ${state}`;
+  return city || state || row.main_office_country?.trim() || "—";
+}
+
+function mapBd(row: BdProspectRow): BusinessDeveloper {
+  return {
+    id: row.firm_id,
+    name: row.name ?? "Unknown firm",
+    crd: row.crd,
+    location: bdLocation(row),
+    deals24mo: row.deals_24mo ?? 0,
+    deals506c24mo: row.deals_506c_24mo ?? 0,
+    capitalPlaced24mo: row.capital_placed_24mo,
+    deals90d: row.deals_90d ?? 0,
+    lastDealAt: row.last_deal_at,
+  };
+}
+
+/**
+ * How many BD prospects to load. The view holds ~1,900 placement-agent firms;
+ * we surface the most recently active to keep the (unvirtualized) table fast.
+ */
+const BDS_LIMIT = 500;
+
+/** A single deal a BD firm was named on, for the BD profile's recent-deals list. */
+export interface BdRecentDeal {
+  accessionNo: string;
+  issuer: string;
+  filedAt: string;
+  offeringAmount: number | null;
+  exemption: string;
+}
+
+/**
+ * Everything we hold on a BD prospect — the full `v_bd_prospects` row plus the
+ * firm's most recent deals, assembled on demand for the BD profile modal.
+ */
+export interface BdProfile {
+  firmId: string;
+  name: string;
+  crd: string | null;
+  segment: string | null;
+  /** FINRA broker-dealer registration scope, e.g. "ACTIVE". */
+  bdScope: string | null;
+  /** FINRA investment-adviser registration scope. */
+  iaScope: string | null;
+  disclosures: number | null;
+  branches: number | null;
+  /** Main office "City, ST" (or country). */
+  location: string;
+  /** When the FINRA profile was last fetched (ISO). */
+  finraFetchedAt: string | null;
+  deals24mo: number;
+  deals506c24mo: number;
+  deals90d: number;
+  capitalPlaced24mo: number | null;
+  capitalPlaced90d: number | null;
+  share506cPct: number | null;
+  momentumPct: number | null;
+  lastDealAt: string | null;
+  last506cDealAt: string | null;
+  industries: string[];
+  recentDeals: BdRecentDeal[];
 }
 
 const INVESTORS: Investor[] = [
@@ -205,58 +342,33 @@ const INVESTORS: Investor[] = [
   },
 ];
 
-const BDS: BusinessDeveloper[] = [
-  {
-    id: "b-1",
-    name: "Grant Holloway",
-    company: "Frontier Energy Partners",
-    region: "Permian Basin",
-    phone: "(432) 555-0148",
-    email: "gholloway@frontierep.com",
-    status: "Active",
-  },
-  {
-    id: "b-2",
-    name: "Renee Salazar",
-    company: "Crossroads Capital Group",
-    region: "Mid-Continent",
-    phone: "(405) 555-0192",
-    email: "rsalazar@crossroadscg.com",
-    status: "Active",
-  },
-  {
-    id: "b-3",
-    name: "Wesley Park",
-    company: "Lone Star Advisory",
-    region: "Eagle Ford",
-    phone: "(210) 555-0173",
-    email: "wpark@lonestaradvisory.com",
-    status: "Active",
-  },
-  {
-    id: "b-4",
-    name: "Bianca Reyes",
-    company: "Tidewater Securities",
-    region: "Gulf Coast",
-    phone: "(504) 555-0119",
-    email: "breyes@tidewatersec.com",
-    status: "Inactive",
-  },
-  {
-    id: "b-5",
-    name: "Nathan Briggs",
-    company: "Summit Resource Brokers",
-    region: "Rockies",
-    phone: "(303) 555-0167",
-    email: "nbriggs@summitrb.com",
-    status: "Active",
-  },
-];
-
 export async function getInvestors(): Promise<Investor[]> {
   return INVESTORS;
 }
 
+/**
+ * Business developer prospects — placement agents / broker-dealers ranked by
+ * recent deal activity (90-day, then 24-month). Reads from the prospecting
+ * project's `v_bd_prospects` view. Returns an empty list when the prospecting
+ * Supabase project is not configured.
+ */
 export async function getBusinessDevelopers(): Promise<BusinessDeveloper[]> {
-  return BDS;
+  const sb = getProspectingClient();
+  if (!sb) return [];
+
+  const { data, error } = await sb
+    .from("v_bd_prospects")
+    .select(
+      "firm_id, name, crd, main_office_city, main_office_state, main_office_country, deals_24mo, deals_506c_24mo, capital_placed_24mo, deals_90d, last_deal_at"
+    )
+    .order("deals_90d", { ascending: false, nullsFirst: false })
+    .order("deals_24mo", { ascending: false, nullsFirst: false })
+    .limit(BDS_LIMIT);
+
+  if (error) {
+    console.error("[numena] getBusinessDevelopers failed:", error.message);
+    return [];
+  }
+
+  return ((data ?? []) as BdProspectRow[]).map(mapBd);
 }

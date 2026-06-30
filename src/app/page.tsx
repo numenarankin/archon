@@ -20,7 +20,7 @@ const LANDING_FALLBACKS: Array<{ path: string; perm: PermissionKey }> = [
   { path: "/analytics", perm: "view_analytics" },
   { path: "/calendar", perm: "view_calendar" },
   { path: "/email", perm: "view_email" },
-  { path: "/numena", perm: "view_prospects" },
+  { path: "/numena/prospecting", perm: "view_prospects" },
   { path: "/wildcat/sales", perm: "view_sales" },
   { path: "/budgeting", perm: "view_budgeting" },
 ];

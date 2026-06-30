@@ -4,11 +4,8 @@ import { hasSupabase } from "@/lib/env";
 import { getSupabaseServer } from "@/lib/supabase/server";
 import {
   DEFAULT_SALES_CONFIG,
-  SEED_CALL_HISTORY,
-  SEED_PROSPECTS,
   dayKeyFromNum,
   formatDuration,
-  numFromDayKey,
   type CallRecord,
   type CallStatus,
   type DossierField,
@@ -18,6 +15,19 @@ import {
 } from "@/lib/wildcat/sales";
 
 type Sb = Awaited<ReturnType<typeof getSupabaseServer>>;
+
+/** Which business unit's desk we're reading (its prospects, calls). */
+export type BusinessUnitKey = "wildcat" | "numena";
+
+/** Resolve a business unit's id from its key (RLS-scoped to the workspace). */
+async function businessUnitId(sb: Sb, key: BusinessUnitKey): Promise<string | null> {
+  const { data } = await sb
+    .from("business_units")
+    .select("id")
+    .eq("key", key)
+    .maybeSingle();
+  return (data as { id: string } | null)?.id ?? null;
+}
 
 const PROSPECT_COLS =
   "id, name, title, company, phone, email, location, status, queue_day, sort_order, hook, highlights, dossier, last_called_at";
@@ -62,70 +72,33 @@ function mapProspect(r: ProspectRow): Prospect {
   };
 }
 
-/** Shape we insert when seeding an empty desk from the in-memory prospects. */
-function prospectToRow(p: Prospect) {
-  return {
-    name: p.name,
-    title: p.title,
-    company: p.company,
-    phone: p.phone,
-    email: p.email,
-    location: p.location,
-    area_code: areaCodeOf(p.phone),
-    status: p.status,
-    queue_day: numFromDayKey(p.day),
-    sort_order: 0,
-    hook: p.hook,
-    highlights: p.highlights,
-    dossier: p.dossier,
-  };
-}
-
-/** Best-effort NANP area code from a phone string. */
-export function areaCodeOf(phone: string): string | null {
-  const digits = phone.replace(/\D/g, "");
-  const national = digits.length === 11 && digits.startsWith("1")
-    ? digits.slice(1)
-    : digits;
-  return national.length >= 10 ? national.slice(0, 3) : null;
-}
-
 /**
- * The day's queue, ordered. Falls back to the in-memory seed when Supabase is
- * unconfigured or unreachable. When the table exists but is empty, it seeds the
- * desk from the in-memory prospects once so the workspace starts populated.
+ * A business unit's queue, read straight from the database (Unscheduled first,
+ * then by day + position). Empty until prospects are added — no mock seed.
  */
-export async function getQueue(): Promise<Prospect[]> {
-  if (!hasSupabase()) return SEED_PROSPECTS;
+export async function getQueue(buKey: BusinessUnitKey): Promise<Prospect[]> {
+  if (!hasSupabase()) return [];
   try {
     const sb = await getSupabaseServer();
-    let rows = await selectProspects(sb);
-    if (rows.length === 0) {
-      await seedProspects(sb);
-      rows = await selectProspects(sb);
-    }
-    return rows.length ? rows.map(mapProspect) : SEED_PROSPECTS;
+    const buId = await businessUnitId(sb, buKey);
+    if (!buId) return [];
+    const rows = await selectProspects(sb, buId);
+    return rows.map(mapProspect);
   } catch (error) {
-    console.error("[sales] getQueue fell back to seed:", error);
-    return SEED_PROSPECTS;
+    console.error("[sales] getQueue failed:", error);
+    return [];
   }
 }
 
-async function selectProspects(sb: Sb): Promise<ProspectRow[]> {
+async function selectProspects(sb: Sb, buId: string): Promise<ProspectRow[]> {
   const { data, error } = await sb
     .from("sales_prospects")
     .select(PROSPECT_COLS)
-    .order("queue_day", { ascending: true })
+    .eq("business_unit_id", buId)
+    .order("queue_day", { ascending: true, nullsFirst: true })
     .order("sort_order", { ascending: true });
   if (error) throw new Error(`selectProspects: ${error.message}`);
   return (data ?? []) as ProspectRow[];
-}
-
-async function seedProspects(sb: Sb): Promise<void> {
-  const { error } = await sb
-    .from("sales_prospects")
-    .insert(SEED_PROSPECTS.map(prospectToRow));
-  if (error) throw new Error(`seedProspects: ${error.message}`);
 }
 
 // --- Call history ----------------------------------------------------------
@@ -187,17 +160,20 @@ function mapCallRecord(r: CallRow, lines: TranscriptLine[]): CallRecord {
   };
 }
 
-/** Logged calls, newest first. Falls back to the seed when Supabase is down. */
-export async function getCallHistory(): Promise<CallRecord[]> {
-  if (!hasSupabase()) return SEED_CALL_HISTORY;
+/** Logged calls for a business unit, newest first. Empty until calls are made. */
+export async function getCallHistory(buKey: BusinessUnitKey): Promise<CallRecord[]> {
+  if (!hasSupabase()) return [];
   try {
     const sb = await getSupabaseServer();
+    const buId = await businessUnitId(sb, buKey);
+    if (!buId) return [];
     const { data, error } = await sb
       .from("sales_calls")
       .select(
         "id, status, started_at, duration_seconds, notes, dossier_snapshot, " +
-          "sales_prospects ( name, title, company, phone, email, location, queue_day, hook, highlights, dossier )"
+          "sales_prospects!inner ( name, title, company, phone, email, location, queue_day, hook, highlights, dossier, business_unit_id )"
       )
+      .eq("sales_prospects.business_unit_id", buId)
       .order("started_at", { ascending: false })
       .limit(500);
     if (error) throw new Error(`getCallHistory: ${error.message}`);
@@ -205,8 +181,8 @@ export async function getCallHistory(): Promise<CallRecord[]> {
     const linesByCall = await loadTranscriptLines(sb, rows.map((r) => r.id));
     return rows.map((r) => mapCallRecord(r, linesByCall.get(r.id) ?? []));
   } catch (error) {
-    console.error("[sales] getCallHistory fell back to seed:", error);
-    return SEED_CALL_HISTORY;
+    console.error("[sales] getCallHistory failed:", error);
+    return [];
   }
 }
 
