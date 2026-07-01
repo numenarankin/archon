@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { PlusIcon, CheckIcon, Loader2Icon } from "lucide-react";
 import { SwipeUpModal } from "@/components/wells/swipe-up-modal";
+import { IssuerNotepad } from "@/components/numena/issuer-notepad";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { getIssuerProfile } from "@/lib/numena/issuer-actions";
@@ -24,6 +25,9 @@ const dateFormatter = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
   month: "short",
   day: "numeric",
+  // Calendar dates (e.g. first sale) are stored at UTC midnight; format in UTC
+  // so they don't shift a day back in negative-offset local timezones.
+  timeZone: "UTC",
 });
 
 function compactMoney(amount: number | null): string {
@@ -62,7 +66,10 @@ function formatPhone(raw: string | null): string {
 
 /** Up to two initials for the monogram. */
 function initials(name: string): string {
-  const words = name.replace(/[^A-Za-z0-9 ]/g, "").trim().split(/\s+/);
+  const words = name
+    .replace(/[^A-Za-z0-9 ]/g, "")
+    .trim()
+    .split(/\s+/);
   if (words.length === 0 || words[0] === "") return "?";
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
   return (words[0][0] + words[1][0]).toUpperCase();
@@ -173,7 +180,7 @@ function CrmToggleButton({ profile }: { profile: IssuerProfile }) {
         inCrm
           ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
           : "border-border bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground",
-        busy && "opacity-70"
+        busy && "opacity-70",
       )}
     >
       {pending || inCrm === null ? (
@@ -220,8 +227,7 @@ export function IssuerProfileModal({
     };
   }, [open, accessionNo]);
 
-  const current =
-    result && result.accessionNo === accessionNo ? result : null;
+  const current = result && result.accessionNo === accessionNo ? result : null;
   const profile = current?.profile ?? null;
   const status: "idle" | "loading" | "error" =
     current == null ? "loading" : current.profile == null ? "error" : "idle";
@@ -240,161 +246,169 @@ export function IssuerProfileModal({
               .join(" · ") || undefined
           : undefined
       }
-      className="max-w-xl"
+      className="h-[80vh] max-w-6xl"
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">
-        {status === "loading" && (
-          <div className="flex flex-col gap-4">
-            <Skeleton className="h-28 w-full rounded-2xl" />
-            <div className="grid grid-cols-3 gap-2">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-16 rounded-lg" />
-              ))}
-            </div>
-            <Skeleton className="h-24 w-full rounded-lg" />
-          </div>
-        )}
-
-        {status === "error" && (
-          <p className="py-12 text-center text-sm text-muted-foreground">
-            Couldn&apos;t load this issuer&apos;s details.
-          </p>
-        )}
-
-        {profile && status === "idle" && (
-          <>
-            {/* Identity strip: monogram + classification + CIK. */}
-            <div className="flex items-center gap-3">
-              <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary font-heading text-lg font-bold text-primary-foreground ring-1 ring-foreground/10">
-                {initials(profile.name)}
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-5">
+          {status === "loading" && (
+            <div className="flex flex-col gap-4">
+              <Skeleton className="h-28 w-full rounded-2xl" />
+              <div className="grid grid-cols-3 gap-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-16 rounded-lg" />
+                ))}
               </div>
-              <div className="flex min-w-0 flex-col gap-1">
-                <div className="flex flex-wrap gap-1.5">
-                  {profile.entityType && (
+              <Skeleton className="h-24 w-full rounded-lg" />
+            </div>
+          )}
+
+          {status === "error" && (
+            <p className="py-12 text-center text-sm text-muted-foreground">
+              Couldn&apos;t load this issuer&apos;s details.
+            </p>
+          )}
+
+          {profile && status === "idle" && (
+            <>
+              {/* Identity strip: monogram + classification + CIK. */}
+              <div className="flex items-center gap-3">
+                <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary font-heading text-lg font-bold text-primary-foreground ring-1 ring-foreground/10">
+                  {initials(profile.name)}
+                </div>
+                <div className="flex min-w-0 flex-col gap-1">
+                  <div className="flex flex-wrap gap-1.5">
+                    {profile.entityType && (
+                      <span className="rounded-full bg-foreground/5 px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-foreground/10">
+                        {profile.entityType}
+                      </span>
+                    )}
+                    {profile.jurisdiction && (
+                      <span className="rounded-full bg-foreground/5 px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-foreground/10">
+                        {profile.jurisdiction}
+                      </span>
+                    )}
                     <span className="rounded-full bg-foreground/5 px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-foreground/10">
-                      {profile.entityType}
+                      {profile.exemption}
                     </span>
-                  )}
-                  {profile.jurisdiction && (
-                    <span className="rounded-full bg-foreground/5 px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-foreground/10">
-                      {profile.jurisdiction}
-                    </span>
-                  )}
-                  <span className="rounded-full bg-foreground/5 px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-foreground/10">
-                    {profile.exemption}
+                  </div>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    CIK {text(profile.cik)}
+                    {profile.yearOfInception
+                      ? ` · founded ${profile.yearOfInception}`
+                      : ""}
                   </span>
                 </div>
-                <span className="font-mono text-xs text-muted-foreground">
-                  CIK {text(profile.cik)}
-                  {profile.yearOfInception
-                    ? ` · founded ${profile.yearOfInception}`
-                    : ""}
-                </span>
-              </div>
-              <div className="ml-auto self-start">
-                <CrmToggleButton profile={profile} />
-              </div>
-            </div>
-
-            {/* Hero: the offering, big. */}
-            <div className="rounded-2xl border bg-muted/30 p-5">
-              <div className="font-mono text-[0.7rem] font-semibold uppercase tracking-widest text-muted-foreground">
-                Total offering
-              </div>
-              <div className="mt-1 font-heading text-4xl font-bold tabular-nums leading-none">
-                {compactMoney(profile.totalOffering)}
-              </div>
-              {pct != null && (
-                <div className="mt-4">
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-foreground/10">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <div className="mt-1.5 flex justify-between text-xs font-medium text-muted-foreground tabular-nums">
-                    <span>{compactMoney(profile.totalSold)} sold ({pct}%)</span>
-                    <span>{compactMoney(profile.totalRemaining)} left</span>
-                  </div>
+                <div className="ml-auto self-start">
+                  <CrmToggleButton profile={profile} />
                 </div>
-              )}
-            </div>
-
-            {/* Quick stats. */}
-            <div className="grid grid-cols-3 gap-2">
-              <Stat label="Industry" value={text(profile.industry)} />
-              <Stat
-                label="Min Invest"
-                value={compactMoney(profile.minInvestment)}
-              />
-              <Stat label="Investors" value={profile.numTotalInvestors ?? "—"} />
-              <Stat label="Non-Accred" value={profile.numNonAccred ?? "—"} />
-              <Stat label="First Sale" value={date(profile.dateFirstSale)} />
-              <Stat
-                label="Securities"
-                value={
-                  profile.securitiesTypes.length > 0
-                    ? profile.securitiesTypes.join(", ")
-                    : "—"
-                }
-              />
-            </div>
-
-            {/* Contact. */}
-            <div>
-              <SectionTitle>Contact</SectionTitle>
-              <div className="divide-y divide-border/60 rounded-lg border px-3">
-                <Row label="Address" value={text(profile.address)} />
-                <Row label="Phone" value={formatPhone(profile.phone)} />
               </div>
-            </div>
 
-            {/* People. */}
-            <div>
-              <SectionTitle>People · {profile.people.length}</SectionTitle>
-              {profile.people.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No related persons disclosed.
-                </p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {profile.people.map((p, i) => (
-                    <div
-                      key={`${p.name}-${i}`}
-                      className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2"
-                    >
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground/5 font-mono text-[0.6rem] font-semibold text-muted-foreground ring-1 ring-inset ring-foreground/10">
-                          {initials(p.name)}
-                        </div>
-                        <div className="flex min-w-0 flex-col">
-                          <span className="truncate text-sm font-medium">
-                            {p.name}
-                          </span>
-                          {p.location && (
-                            <span className="truncate text-xs text-muted-foreground">
-                              {p.location}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                        {p.relationships.map((r) => (
-                          <span
-                            key={r}
-                            className="rounded-full bg-foreground/5 px-2 py-0.5 text-[0.7rem] font-medium text-muted-foreground ring-1 ring-inset ring-foreground/10"
-                          >
-                            {r}
-                          </span>
-                        ))}
-                      </div>
+              {/* Hero: the offering, big. */}
+              <div className="rounded-2xl border bg-muted/30 p-5">
+                <div className="font-mono text-[0.7rem] font-semibold uppercase tracking-widest text-muted-foreground">
+                  Total offering
+                </div>
+                <div className="mt-1 font-heading text-4xl font-bold tabular-nums leading-none">
+                  {compactMoney(profile.totalOffering)}
+                </div>
+                {pct != null && (
+                  <div className="mt-4">
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-foreground/10">
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{ width: `${pct}%` }}
+                      />
                     </div>
-                  ))}
+                    <div className="mt-1.5 flex justify-between text-xs font-medium text-muted-foreground tabular-nums">
+                      <span>
+                        {compactMoney(profile.totalSold)} sold ({pct}%)
+                      </span>
+                      <span>{compactMoney(profile.totalRemaining)} left</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Quick stats. */}
+              <div className="grid grid-cols-3 gap-2">
+                <Stat label="Industry" value={text(profile.industry)} />
+                <Stat
+                  label="Min Invest"
+                  value={compactMoney(profile.minInvestment)}
+                />
+                <Stat
+                  label="Investors"
+                  value={profile.numTotalInvestors ?? "—"}
+                />
+                <Stat label="Non-Accred" value={profile.numNonAccred ?? "—"} />
+                <Stat label="First Sale" value={date(profile.dateFirstSale)} />
+                <Stat
+                  label="Securities"
+                  value={
+                    profile.securitiesTypes.length > 0
+                      ? profile.securitiesTypes.join(", ")
+                      : "—"
+                  }
+                />
+              </div>
+
+              {/* Contact. */}
+              <div>
+                <SectionTitle>Contact</SectionTitle>
+                <div className="divide-y divide-border/60 rounded-lg border px-3">
+                  <Row label="Address" value={text(profile.address)} />
+                  <Row label="Phone" value={formatPhone(profile.phone)} />
                 </div>
-              )}
-            </div>
-          </>
-        )}
+              </div>
+
+              {/* People. */}
+              <div>
+                <SectionTitle>People · {profile.people.length}</SectionTitle>
+                {profile.people.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No related persons disclosed.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {profile.people.map((p, i) => (
+                      <div
+                        key={`${p.name}-${i}`}
+                        className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2"
+                      >
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground/5 font-mono text-[0.6rem] font-semibold text-muted-foreground ring-1 ring-inset ring-foreground/10">
+                            {initials(p.name)}
+                          </div>
+                          <div className="flex min-w-0 flex-col">
+                            <span className="truncate text-sm font-medium">
+                              {p.name}
+                            </span>
+                            {p.location && (
+                              <span className="truncate text-xs text-muted-foreground">
+                                {p.location}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                          {p.relationships.map((r) => (
+                            <span
+                              key={r}
+                              className="rounded-full bg-foreground/5 px-2 py-0.5 text-[0.7rem] font-medium text-muted-foreground ring-1 ring-inset ring-foreground/10"
+                            >
+                              {r}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        <IssuerNotepad key={accessionNo ?? "none"} accessionNo={accessionNo} />
       </div>
     </SwipeUpModal>
   );

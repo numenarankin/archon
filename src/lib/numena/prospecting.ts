@@ -1,4 +1,5 @@
 import { getProspectingClient } from "@/lib/numena/prospecting-supabase";
+import { timezoneForState } from "@/lib/numena/timezones";
 
 /**
  * Numena prospecting data.
@@ -61,6 +62,12 @@ export interface Filing {
   formType: string;
   /** Industry group the issuer reported. */
   industry: string;
+  /** Primary issuer location, "City, ST" when available. */
+  location: string;
+  /** Predominant time zone for the issuer's state, e.g. "CT" (or "—"). */
+  timezone: string;
+  /** Amount sold to date in US dollars, if disclosed. */
+  raised: number | null;
   /** Total offering amount in US dollars, if disclosed. */
   offeringAmount: number | null;
   /** Reg D exemption claimed, e.g. "506(c)", "506(b)", "504". */
@@ -69,76 +76,122 @@ export interface Filing {
   filedAt: string;
 }
 
-/** Shape of a row from the `v_firm_recent_deals` view in numena-data. */
-interface FirmRecentDealRow {
+/** Offering detail embedded from `form_d_offerings` (one per filing). */
+interface OfferingEmbed {
+  industry_group: string | null;
+  total_offering: number | null;
+  total_sold: number | null;
+  rule_506b: boolean | null;
+  rule_506c: boolean | null;
+  rule_504: boolean | null;
+}
+
+/** Issuer embedded from `form_d_issuers` (one row per issuer on the filing). */
+interface IssuerEmbed {
+  name: string | null;
+  issuer_seq: number | null;
+  address_city: string | null;
+  address_state: string | null;
+}
+
+/**
+ * Shape of a row from `form_d_submissions` in numena-data, with the offering
+ * and issuer(s) embedded via PostgREST. One row per filing — every Form D,
+ * whether or not a broker-dealer / placement agent was named on it.
+ */
+interface FilingRow {
   accession_no: string;
   form_type: string;
   filed_at: string;
-  issuer_name: string | null;
-  industry_group: string | null;
-  total_offering: number | null;
-  rule_506b: boolean;
-  rule_506c: boolean;
-  rule_504: boolean;
+  form_d_offerings: OfferingEmbed | OfferingEmbed[] | null;
+  form_d_issuers: IssuerEmbed[] | null;
 }
 
-function exemptionLabel(row: FirmRecentDealRow): string {
-  if (row.rule_506c) return "506(c)";
-  if (row.rule_506b) return "506(b)";
-  if (row.rule_504) return "504";
+/** Normalize a PostgREST to-one embed that may arrive as an array. */
+function firstOrNull<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
+function exemptionLabel(offering: OfferingEmbed | null): string {
+  if (!offering) return "—";
+  if (offering.rule_506c) return "506(c)";
+  if (offering.rule_506b) return "506(b)";
+  if (offering.rule_504) return "504";
   return "—";
 }
 
-function mapFiling(row: FirmRecentDealRow): Filing {
+/** The primary issuer (issuer_seq 1), falling back to the first listed. */
+function primaryIssuer(issuers: IssuerEmbed[] | null): IssuerEmbed | null {
+  if (!issuers || issuers.length === 0) return null;
+  return issuers.find((i) => i.issuer_seq === 1) ?? issuers[0];
+}
+
+/** "City, ST" for the issuer, falling back to whichever part is present. */
+function issuerLocation(issuer: IssuerEmbed | null): string {
+  const city = issuer?.address_city?.trim();
+  const state = issuer?.address_state?.trim();
+  if (city && state) return `${city}, ${state}`;
+  return city || state || "—";
+}
+
+function mapFiling(row: FilingRow): Filing {
+  const offering = firstOrNull(row.form_d_offerings);
+  const issuer = primaryIssuer(row.form_d_issuers);
   return {
     id: row.accession_no,
-    issuer: row.issuer_name ?? "Unknown issuer",
+    issuer: issuer?.name ?? "Unknown issuer",
     formType: row.form_type,
-    industry: row.industry_group ?? "—",
-    offeringAmount: row.total_offering,
-    exemption: exemptionLabel(row),
+    industry: offering?.industry_group ?? "—",
+    location: issuerLocation(issuer),
+    timezone: timezoneForState(issuer?.address_state),
+    exemption: exemptionLabel(offering),
+    raised: offering?.total_sold ?? null,
+    offeringAmount: offering?.total_offering ?? null,
     filedAt: row.filed_at,
   };
 }
 
-/** How many unique filings to show, to keep the table fast to load. */
+/** How many filings to show, to keep the table fast to load. */
 const FILINGS_LIMIT = 1000;
 
 /**
  * Rows per request. PostgREST caps responses at 1000 rows, so we page through
- * with `.range()`. `v_firm_recent_deals` is firm-grained — one row per
- * (recipient firm, filing) — so a single filing appears multiple times and we
- * de-dupe by accession number across pages.
+ * with `.range()`. `form_d_submissions` is filing-grained — one row per filing
+ * — so no de-duplication is needed.
  */
 const PAGE_SIZE = 1000;
 
-/**
- * Safety cap on pages fetched, so a low de-dupe ratio can't spiral into an
- * unbounded scan. ~2.3x duplication observed, so 8 pages comfortably covers
- * 1000 unique filings.
- */
+/** Safety cap on pages fetched, so the scan can never run unbounded. */
 const MAX_PAGES = 8;
 
 /**
- * The most recent Form D filings, newest first, de-duplicated to one row per
- * filing. Reads directly from the prospecting project's `v_firm_recent_deals`
- * view. Returns an empty list when the prospecting Supabase project is not
- * configured.
+ * Columns pulled per filing: the submission itself, plus its offering detail
+ * and issuer(s) embedded from `form_d_offerings` / `form_d_issuers`.
+ */
+const FILINGS_SELECT =
+  "accession_no, form_type, filed_at, " +
+  "form_d_offerings(industry_group, total_offering, total_sold, rule_506b, rule_506c, rule_504), " +
+  "form_d_issuers(name, issuer_seq, address_city, address_state)";
+
+/**
+ * The most recent Form D filings, newest first — one row per filing. Reads
+ * directly from the prospecting project's `form_d_submissions` table, so it
+ * includes every filing regardless of whether a broker-dealer / placement
+ * agent was named on it. Returns an empty list when the prospecting Supabase
+ * project is not configured.
  */
 export async function getFilings(): Promise<Filing[]> {
   const sb = getProspectingClient();
   if (!sb) return [];
 
-  const seen = new Set<string>();
   const filings: Filing[] = [];
 
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const from = page * PAGE_SIZE;
     const { data, error } = await sb
-      .from("v_firm_recent_deals")
-      .select(
-        "accession_no, form_type, filed_at, issuer_name, industry_group, total_offering, rule_506b, rule_506c, rule_504"
-      )
+      .from("form_d_submissions")
+      .select(FILINGS_SELECT)
       .order("filed_at", { ascending: false })
       .order("accession_no", { ascending: false })
       .range(from, from + PAGE_SIZE - 1);
@@ -148,12 +201,8 @@ export async function getFilings(): Promise<Filing[]> {
       break;
     }
 
-    const rows = (data ?? []) as FirmRecentDealRow[];
-    for (const row of rows) {
-      if (seen.has(row.accession_no)) continue;
-      seen.add(row.accession_no);
-      filings.push(mapFiling(row));
-    }
+    const rows = (data ?? []) as unknown as FilingRow[];
+    for (const row of rows) filings.push(mapFiling(row));
 
     // Stop once we have enough, or when the source is exhausted.
     if (filings.length >= FILINGS_LIMIT || rows.length < PAGE_SIZE) break;

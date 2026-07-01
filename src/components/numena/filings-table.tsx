@@ -23,9 +23,14 @@ const dateFormatter = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
   month: "short",
   day: "numeric",
+  // filed_at is a calendar date stored at UTC midnight. Format in UTC so the
+  // displayed day matches the SEC filing date (and the date filter, which
+  // compares the UTC `filedAt.slice(0, 10)`) instead of shifting a day back in
+  // negative-offset local timezones.
+  timeZone: "UTC",
 });
 
-function formatOffering(amount: number | null): string {
+function formatMoney(amount: number | null): string {
   if (amount == null) return "—";
   return currencyFormatter.format(amount);
 }
@@ -48,7 +53,10 @@ export function FilingsTable({ filings }: { filings: Filing[] }) {
               <TableHead>Issuer</TableHead>
               <TableHead>Form</TableHead>
               <TableHead>Industry</TableHead>
+              <TableHead>Location</TableHead>
+              <TableHead>Time Zone</TableHead>
               <TableHead>Exemption</TableHead>
+              <TableHead className="text-right">Raised</TableHead>
               <TableHead className="text-right">Offering</TableHead>
               <TableHead className="text-right">Filed</TableHead>
             </TableRow>
@@ -57,7 +65,7 @@ export function FilingsTable({ filings }: { filings: Filing[] }) {
             {filings.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={9}
                   className="h-24 text-center text-muted-foreground"
                 >
                   No filings to display.
@@ -83,10 +91,19 @@ export function FilingsTable({ filings }: { filings: Filing[] }) {
                     {f.industry}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
+                    {f.location}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {f.timezone}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
                     {f.exemption}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {formatOffering(f.offeringAmount)}
+                    {formatMoney(f.raised)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {formatMoney(f.offeringAmount)}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {formatFiledAt(f.filedAt)}

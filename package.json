@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "TSX_TSCONFIG_PATH=./tsconfig.test.json tsx --test \"tests/**/*.test.ts\""
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.84",

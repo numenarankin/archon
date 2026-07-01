@@ -25,6 +25,9 @@ const dateFormatter = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
   month: "short",
   day: "numeric",
+  // Calendar dates are stored at UTC midnight; format in UTC so they don't
+  // shift a day back in negative-offset local timezones.
+  timeZone: "UTC",
 });
 
 function formatCapital(amount: number | null): string {
