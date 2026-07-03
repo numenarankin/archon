@@ -17,6 +17,7 @@ import {
 	GemIcon,
 	KanbanIcon,
 	HandshakeIcon,
+	LifeBuoyIcon,
 } from "lucide-react";
 import { SparkleIcon } from "@/components/ai/sparkle-icon";
 import type { PermissionKey } from "@/lib/settings/org";
@@ -59,6 +60,12 @@ export const navGroups: SidebarNavGroup[] = [
 				title: "Email",
 				path: "/email",
 				icon: <MailIcon />,
+				permission: "view_email",
+			},
+			{
+				title: "Support",
+				path: "/support",
+				icon: <LifeBuoyIcon />,
 				permission: "view_email",
 			},
 			{
