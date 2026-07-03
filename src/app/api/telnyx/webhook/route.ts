@@ -2,7 +2,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import {
   decodeClientState,
   encodeClientState,
-  startTranscription,
+  startTranscription as startTranscriptionImpl,
   verifyTelnyxSignature,
   type CallClientState,
   type TranscriptionClientState,
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
 
   try {
     if (type) await handleEvent(type, payload);
-  } catch (error) {
+  } catch (error: unknown) {
     // Log but 200 so Telnyx doesn't hammer retries; we have the raw event logged.
     console.error("[telnyx webhook]", type, error);
   }
@@ -62,8 +62,22 @@ interface TelnyxEvent {
   payload?: TelnyxPayload;
 }
 
-async function handleEvent(type: string, payload: TelnyxPayload): Promise<void> {
-  const admin = getSupabaseAdmin();
+/**
+ * Dependencies handleEvent touches, injectable so the branch logic can be unit
+ * tested without a live Supabase or Telnyx. Defaults wire up the real clients.
+ */
+export interface WebhookDeps {
+  admin: ReturnType<typeof getSupabaseAdmin>;
+  startTranscription: typeof startTranscriptionImpl;
+}
+
+export async function handleEvent(
+  type: string,
+  payload: TelnyxPayload,
+  deps?: Partial<WebhookDeps>
+): Promise<void> {
+  const admin = deps?.admin ?? getSupabaseAdmin();
+  const startTranscription = deps?.startTranscription ?? startTranscriptionImpl;
 
   if (type === "call.initiated") {
     const state = decodeClientState<CallClientState>(payload.client_state);
@@ -105,17 +119,14 @@ async function handleEvent(type: string, payload: TelnyxPayload): Promise<void> 
       .maybeSingle();
     if (!call) return;
 
-    const { count } = await admin
-      .from("sales_call_lines")
-      .select("*", { count: "exact", head: true })
-      .eq("call_id", state.callId);
-
+    // seq is omitted: the DB assigns a monotonic identity value. The two
+    // transcription tracks (inbound + outbound) POST concurrently, so a
+    // read-modify-write count here would race and collide on seq.
     await admin.from("sales_call_lines").insert({
       workspace_id: (call as { workspace_id: string }).workspace_id,
       call_id: state.callId,
       speaker: state.track === "inbound" ? "rep" : "prospect",
       text: td.transcript,
-      seq: count ?? 0,
     });
     return;
   }
