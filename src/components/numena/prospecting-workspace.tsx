@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { FilingsTable } from "@/components/numena/filings-table";
 import { InvestorsTable } from "@/components/numena/investors-table";
 import { BdsTable } from "@/components/numena/bds-table";
+import { ProspectExport } from "@/components/numena/prospect-export";
 import {
   FilingsFilters,
   DEFAULT_FILING_FILTERS,
@@ -104,12 +105,18 @@ export function ProspectingWorkspace({
         </div>
 
         {tab === "filings" && (
-          <FilingsFilters
-            exemptions={exemptions}
-            industries={industries}
-            value={filters}
-            onChange={setFilters}
-          />
+          <div className="flex items-center gap-2">
+            <ProspectExport
+              exemption={filters.exemption}
+              industry={filters.industry}
+            />
+            <FilingsFilters
+              exemptions={exemptions}
+              industries={industries}
+              value={filters}
+              onChange={setFilters}
+            />
+          </div>
         )}
       </div>
 
